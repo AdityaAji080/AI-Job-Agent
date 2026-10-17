@@ -25,6 +25,10 @@ def test_market_of(loc, market):
     ("Software Engineering Intern", False), ("Account Executive, AI", False),
     ("Technical Recruiter", False), ("Data Analyst", False), ("Product Manager, AI", False),
     ("Terminal Operations Manager", False), ("Office Manager", False),
+    ("Staff Machine Learning Manager", False), ("Director, Fleet Solutions", False),
+    ("Lead Salesforce Developer, GTM Systems", False), ("AI Success Manager (US East)", False),
+    ("Content Systems Engineer, Technical Documentation", False), ("Engineering Manager II", False),
+    ("Lead Site Reliability Engineer", True), ("Staff Engineer I", True), ("Applied AI Architect", True),
 ])
 def test_title_ok(title, ok):
     assert filters.title_ok(title) is ok
@@ -45,7 +49,9 @@ def test_stale_flag_respects_future_dates():
                                  posted=old, description="Join us."), b)
     intake = to_candidate(Posting("greenhouse", "x", "X", "2", "ML Engineer", "https://a/2", posted=old,
                                   description=f"Starts January {today.year + 1}."), b)
-    assert stale.looks_stale and not intake.looks_stale
+    boilerplate = to_candidate(Posting("greenhouse", "x", "X", "3", "ML Engineer", "https://a/3", posted=old,
+                                       description=f"Named to the Forbes AI 50 in {today.year}. Join us."), b)
+    assert stale.looks_stale and not intake.looks_stale and boilerplate.looks_stale
 
 
 def test_prefilter_and_rank():

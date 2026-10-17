@@ -62,6 +62,10 @@ TITLE_EXCLUDE = re.compile(
     r"(business|sales|revenue|people|marketing|warehouse|terminal|fleet|store) operations|"
     r"operations (manager|associate|analyst|specialist|coordinator)|"
     r"(product|program|project|office|facilities) manager|"
+    # People-management and leadership roles. Any title naming the role itself as a
+    # manager, director or head is a different job from IC engineering at 2 years in.
+    r"\bmanager\b|\bdirector\b|\bhead of\b|\bvp\b|vice president|"
+    r"salesforce|\bgtm\b|go-to-market|technical (writer|writing|documentation)|"
     r"technician|mechanic|electrician|driver\b|"
     r"(graphic|visual|ux|ui|product) designer",
     re.I,

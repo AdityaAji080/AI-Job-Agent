@@ -291,8 +291,13 @@ async def main() -> int:
     print(harvest_summary(run), flush=True)
 
     if args.dry_run:
-        for c in run.open_candidates()[:40]:
-            print(f"  [{c.market}] {c.company}: {c.title} | {c.location} | {c.posted or c.posted_note or 'undated'}")
+        no_desc = sum(1 for c in run.pool.values() if not c.description)
+        stale = sum(1 for c in run.pool.values() if c.looks_stale)
+        print(f"- Without a description: {no_desc}. Flagged stale: {stale}.")
+        for c in run.open_candidates()[:60]:
+            flags = (" | STALE" if c.looks_stale else "") + ("" if c.description else " | NO DESCRIPTION")
+            print(f"  [{c.market}] {c.company}: {c.title} | {c.location} | "
+                  f"{c.posted or c.posted_note or 'undated'}{flags}")
         return 0
 
     registry.save()  # keep board health even if the model step fails

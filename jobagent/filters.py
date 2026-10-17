@@ -71,9 +71,19 @@ def age_days(posted: str, today: date | None = None) -> int | None:
 
 
 _FUTURE_YEAR = re.compile(r"\b(20\d\d)\b")
+_TIMING_WORDS = re.compile(
+    r"start|intake|join(ing)?\b|deadline|apply by|applications? close|cohort|class of|"
+    r"graduat|batch|programme|program\b|commenc|onboard", re.I)
 
 
 def mentions_future_date(text: str, today: date | None = None) -> bool:
-    """True if the text names this year or a later one (an intake, start date, deadline)."""
+    """True if a sentence about timing (start, intake, deadline, cohort) names this year or later.
+
+    A bare year is not enough: company boilerplate ("Forbes AI 50, 2026", "© 2026")
+    would otherwise make every old evergreen posting look current.
+    """
     year = (today or date.today()).year
-    return any(int(y) >= year for y in _FUTURE_YEAR.findall(text or ""))
+    for sentence in _SENTENCE.findall(text or ""):
+        if _TIMING_WORDS.search(sentence) and any(int(y) >= year for y in _FUTURE_YEAR.findall(sentence)):
+            return True
+    return False
