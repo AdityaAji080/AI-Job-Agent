@@ -1,0 +1,114 @@
+"""Settings. Everything you are likely to tune lives here.
+
+Personal files (resume, criteria) and data (tracker, board registry) live under
+JOBAGENT_HOME, which defaults to ./private. In CI that folder is a checkout of a
+separate private repository, so this code repository can stay public.
+"""
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+HOME = Path(os.environ.get("JOBAGENT_HOME", "private")).resolve()
+PROFILE_DIR = HOME / "profile"
+DATA_DIR = HOME / "data"
+
+RESUME_PATH = PROFILE_DIR / "resume.md"
+CRITERIA_PATH = PROFILE_DIR / "criteria.md"
+
+JOBS_CSV = DATA_DIR / "jobs.csv"
+SEEN_CSV = DATA_DIR / "seen.csv"
+BOARDS_CSV = DATA_DIR / "boards.csv"
+RUNS_CSV = DATA_DIR / "runs.csv"
+
+# --- Run limits -------------------------------------------------------------
+MAX_NEW_JOBS = int(os.environ.get("MAX_NEW_JOBS", "25"))
+MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "5.00"))
+MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
+
+# --- Harvester --------------------------------------------------------------
+HTTP_TIMEOUT = 25.0
+CONCURRENCY = 8
+USER_AGENT = "job-agent/1.0 (personal job search; +https://github.com)"
+# A board that fails this many runs in a row is disabled (re-enable in boards.csv).
+MAX_BOARD_FAILURES = 3
+# Workday tenants are huge, so we search them rather than list everything.
+WORKDAY_SEARCH_TERMS = [
+    "machine learning", "AI engineer", "software engineer", "computer vision",
+    "research engineer", "robotics", "embedded", "perception",
+]
+WORKDAY_MAX_PER_TERM = 60
+DESCRIPTION_CHARS = 12000  # how much of a posting the model sees per get_posting
+
+# --- Title prefilter ----------------------------------------------------------
+# A title must match INCLUDE and must not match EXCLUDE. Deliberately loose:
+# the model applies the real criteria. This only drops obvious non-matches.
+TITLE_INCLUDE = re.compile(
+    r"engineer|engineering|scientist|developer|research|\bml\b|\bmle\b|machine learning|"
+    r"\bai\b|\ba\.i\.|artificial intelligence|\bllm|computer vision|perception|robotic|"
+    r"autonomy|member of technical staff|\bmts\b|architect|deploy|solutions|\bswe\b|\bsde\b|"
+    r"software|embedded|firmware|real-time|applied|programmer",
+    re.I,
+)
+TITLE_EXCLUDE = re.compile(
+    r"\bintern\b|internship|\bco-?op\b|apprentice|working student|"
+    r"\bsales\b|account (executive|manager)|business development|recruit|talent|"
+    r"marketing|\blegal\b|counsel|paralegal|finance|accountant|accounting|payroll|"
+    r"\bhr\b|people (partner|operations)|"
+    r"data analyst|business analyst|business intelligence|\bbi (developer|engineer|analyst)\b|"
+    r"reporting analyst|dashboard|"
+    r"customer (success|support)|support specialist|"
+    r"(business|sales|revenue|people|marketing|warehouse|terminal|fleet|store) operations|"
+    r"operations (manager|associate|analyst|specialist|coordinator)|"
+    r"(product|program|project|office|facilities) manager|"
+    r"technician|mechanic|electrician|driver\b|"
+    r"(graphic|visual|ux|ui|product) designer",
+    re.I,
+)
+
+# --- Markets ------------------------------------------------------------------
+# Ordered by priority. The first market whose pattern matches a location wins.
+MARKETS: list[tuple[str, re.Pattern]] = [
+    ("India", re.compile(
+        r"\bindia\b|bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|noida|hyderabad|"
+        r"pune|chennai|kochi|thiruvananthapuram|trivandrum|ahmedabad|kolkata", re.I)),
+    ("Canada", re.compile(
+        r"canada|toronto|vancouver|montr[eé]al|ottawa|waterloo|kitchener|calgary|edmonton|"
+        r"halifax|winnipeg|qu[eé]bec|victoria, bc|, ?(on|bc|ab|qc|ns|mb)\b", re.I)),
+    ("Singapore", re.compile(r"singapore", re.I)),
+    ("United States", re.compile(
+        r"united states|\busa?\b|u\.s\.|americas|"
+        r"san francisco|new york|seattle|boston|austin|los angeles|chicago|mountain view|"
+        r"palo alto|menlo park|sunnyvale|san jose|san mateo|redmond|pittsburgh|denver|"
+        r"atlanta|washington|ann arbor|detroit|miami|dallas|houston|bay area|"
+        r"alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|"
+        r"georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|"
+        r"maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|"
+        r"nevada|new hampshire|new jersey|new mexico|north carolina|north dakota|ohio|"
+        r"oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|"
+        r"texas|utah|vermont|virginia|wisconsin|wyoming|"
+        r", ?(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|"
+        r"ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)\b",
+        re.I)),
+]
+# Locations that are clearly somewhere else. Anything matching no market and
+# none of these is kept as "Unknown" and ranked last, never silently dropped.
+OTHER_PLACES = re.compile(
+    r"\buk\b|united kingdom|england|london|cambridge, uk|edinburgh|manchester|ireland|dublin|"
+    r"germany|berlin|munich|m[uü]nchen|hamburg|frankfurt|france|paris|netherlands|amsterdam|"
+    r"belgium|brussels|switzerland|z[uü]rich|geneva|austria|vienna|poland|warsaw|krak[oó]w|"
+    r"spain|madrid|barcelona|portugal|lisbon|italy|milan|rome|sweden|stockholm|denmark|"
+    r"copenhagen|norway|oslo|finland|helsinki|czech|prague|romania|bucharest|hungary|budapest|"
+    r"ukraine|serbia|belgrade|greece|athens|turkey|istanbul|israel|tel aviv|\buae\b|dubai|"
+    r"abu dhabi|saudi|riyadh|qatar|doha|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|"
+    r"cape town|johannesburg|japan|tokyo|osaka|korea|seoul|china|beijing|shanghai|shenzhen|"
+    r"hangzhou|hong kong|taiwan|taipei|philippines|manila|vietnam|hanoi|ho chi minh|indonesia|"
+    r"jakarta|malaysia|kuala lumpur|thailand|bangkok|australia|sydney|melbourne|brisbane|"
+    r"new zealand|auckland|brazil|s[aã]o paulo|mexico|ciudad de m|argentina|buenos aires|"
+    r"colombia|bogot[aá]|chile|santiago|peru|lima|pakistan|bangladesh|sri lanka|\bemea\b|"
+    r"\beurope\b|\blatam\b",
+    re.I,
+)
+REMOTE = re.compile(r"remote|anywhere|distributed|work from home|\bwfh\b", re.I)
+STALE_DAYS = 60

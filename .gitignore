@@ -1,0 +1,7 @@
+# Personal data lives in a separate private repository, checked out here.
+private/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
