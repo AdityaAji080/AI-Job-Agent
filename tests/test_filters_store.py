@@ -48,6 +48,9 @@ def test_experience_range(hint, expected):
     ("Lead Salesforce Developer, GTM Systems", False), ("AI Success Manager (US East)", False),
     ("Content Systems Engineer, Technical Documentation", False), ("Engineering Manager II", False),
     ("Lead Site Reliability Engineer", True), ("Staff Engineer I", True), ("Applied AI Architect", True),
+    ("Research Fellow (Organic Chemistry)", False), ("Part-time Lecturer, EEE", False),
+    ("Project Officer (Engineering)", False), ("Senior Assistant Manager, Research Development", False),
+    ("Research Engineer (Robotics)", True), ("Research Scientist, Evals", True),
 ])
 def test_title_ok(title, ok):
     assert filters.title_ok(title) is ok

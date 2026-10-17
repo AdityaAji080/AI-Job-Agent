@@ -36,8 +36,9 @@ the employers this person can actually be hired by in Singapore, often companies
 would think to search for. Their summaries may carry:
 - `applicants_so_far`: how many people have applied. Fewer, and a recent posted date, is an
   early-applicant opportunity worth naming in `why`.
-- `note`: when the poster is or may be a recruitment agency. Skip agencies hiring for an
-  unnamed client, as the criteria say; an agency posting that names the employer is fine.
+- `note`: when an agency posted on behalf of a named employer. These are fine; the company
+  shown is the real employer. Agency ads that don't name the employer were already removed.
+  Elsewhere, still skip any agency hiring for an unnamed client, as the criteria say.
 
 The harvester is deliberately loose. Many pool candidates will still fail the criteria; that
 is your job to decide.

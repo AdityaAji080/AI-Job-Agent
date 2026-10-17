@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 import sys
 from dataclasses import dataclass, field
 
@@ -70,6 +71,7 @@ class BoardResult:
     postings: int = 0
     candidates: list[Candidate] = field(default_factory=list)
     error: str = ""
+    dropped: dict = field(default_factory=dict)  # reason -> count, after reading full postings
 
 
 def to_candidate(p: Posting, board: Board) -> Candidate:
@@ -121,9 +123,10 @@ async def harvest_board(client, board: Board, known: set[str], sem: asyncio.Sema
                 except Exception:
                     pass  # keep the posting; the model can open the URL itself
     await asyncio.gather(*(enrich(p) for p in kept))
-    kept = [p for p in kept if not p.extra.get("closed")]
+    dropped = Counter(p.extra["drop"] for p in kept if p.extra.get("drop"))
+    kept = [p for p in kept if not p.extra.get("closed") and not p.extra.get("drop")]
     return BoardResult(board, ok=True, postings=len(postings),
-                       candidates=[to_candidate(p, board) for p in kept])
+                       candidates=[to_candidate(p, board) for p in kept], dropped=dict(dropped))
 
 
 async def harvest(boards: list[Board], known: set[str]) -> list[BoardResult]:

@@ -67,7 +67,7 @@ MCF_MAX_AGE_DAYS = 45       # postings older than this are ignored at harvest  #
 # A title must match INCLUDE and must not match EXCLUDE. Deliberately loose:
 # the model applies the real criteria. This only drops obvious non-matches.
 TITLE_INCLUDE = re.compile(
-    r"engineer|engineering|scientist|developer|research|\bml\b|\bmle\b|machine learning|"
+    r"engineer|engineering|scientist|developer|research (engineer|scientist)|\bml\b|\bmle\b|machine learning|"
     r"\bai\b|\ba\.i\.|artificial intelligence|\bllm|computer vision|perception|robotic|"
     r"autonomy|member of technical staff|\bmts\b|architect|deploy|solutions|\bswe\b|\bsde\b|"
     r"software|embedded|firmware|real-time|applied|programmer",
@@ -92,6 +92,11 @@ TITLE_EXCLUDE = re.compile(
     r"\bdirector\b|\bhead of\b|\bvp\b|vice president|"
     r"salesforce|\bgtm\b|go-to-market|technical (writer|writing|documentation)|"
     r"technician|mechanic|electrician|driver\b|"
+    # Academic and research-administration roles (university boards are full of these).
+    r"lecturer|professor|teaching|\btutor|postdoc|post-doc|research fellow|research assistant|"
+    r"research associate|project officer|assistant manager|programme (manager|management)|"
+    r"program management|partnership|\bgrants?\b|"
+    r"chemistry|chemical|biolog|electrocatalys|geolog|physics|materials science|"
     r"(graphic|visual|ux|ui|product) designer",
     re.I,
 )

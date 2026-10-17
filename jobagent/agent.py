@@ -306,6 +306,9 @@ def harvest_summary(run: Run) -> str:
     counts = run.market_counts()
     lines.append("- Pool by market: " + (", ".join(f"{m} {counts[m]}" for m in filters.MARKET_ORDER
                                                     if counts.get(m)) or "empty"))
+    for r in ok:
+        for reason, n in r.dropped.items():
+            lines.append(f"- Dropped from {r.board.company or r.board.slug}: {n} ({reason}).")
     for r in failed:
         lines.append(f"- Board failed: {r.board.company or r.board.slug} ({r.board.ats}): {r.error}")
     if not run.board_results:

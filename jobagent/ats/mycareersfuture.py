@@ -23,24 +23,43 @@ NAME = "mycareersfuture"
 API = "https://api.mycareersfuture.gov.sg/v2"
 BOARD = Board(ats=NAME, slug="sg", company="MyCareersFuture (all Singapore employers)")
 
-_AGENCY = re.compile(r"recruit|staffing|manpower|personnel|headhunt|executive search|talent|"
-                     r"\bhr\b|human resource|placement|employment agency|outsourc", re.I)
-_LEGAL_SUFFIX = re.compile(r"[\s,.]*(pte\.?\s*ltd\.?|private limited|limited|ltd\.?|llp|inc\.?|"
-                           r"\(singapore\)|singapore branch|s'pore)\s*$", re.I)
+# Agencies by name: generic words, plus the large firms whose names don't say so.
+_AGENCY = re.compile(
+    r"recruit|staffing|manpower|personnel|headhunt|executive search|talent|\bhr\b|human resource|"
+    r"placement|employment agency|outsourc|"
+    r"randstad|adecco|kelly services|persolkelly|michael page|page personnel|robert walters|"
+    r"robert half|\bhays\b|access people|ambition|\bgmp\b|kerry consulting|morgan mckinley|"
+    r"charterhouse|scientec|good job creations|search index|achieve group|careerally|"
+    r"idc technologies|aryan solutions|unizen",
+    re.I)
+# Singapore employment agencies must print their EA licence (e.g. "EA Licence 16C8209")
+# and their recruiter's registration number (e.g. "R1872345") on every ad.
+_EA_LICENCE = re.compile(
+    r"\bEA\s*(licen[cs]e|lic\b|reg(istration)?\b)|"                       # "EA Licence", "EA Reg"
+    r"(licen[cs]e|\blic\b\.?|\bEA\b)[^\n]{0,30}\b\d{2}C\d{4,5}\b|"          # "Licence No: 16C8209"
+    r"(registration|reg\.?|personnel|recruiter|consultant)[^\n]{0,40}\bR\d{7}\b",  # "Reg No: R1872345"
+    re.I)
+_LEGAL_SUFFIX = re.compile(r"[\s,.]*(pte\.?\s*ltd\.?|pte\.?\s*limited|private limited|limited|ltd\.?|"
+                           r"pte\.?|llp|inc\.?|\((singapore|s)\)|singapore branch|s'pore)\s*$", re.I)
 
 
 def parse_url(url: str) -> str | None:
     return None  # a search source, not a company board; never registered from a URL
 
 
+_COMMON_SHORT = {"bank", "group", "labs", "lab", "tech", "data", "asia", "care", "life", "link", "mind",
+                 "soft", "core", "edge", "wave", "home", "food", "auto", "city", "next", "health", "one"}
+
+
 def company_name(raw: str) -> str:
     """'CFGI SINGAPORE PTE. LTD.' -> 'Cfgi Singapore'. Legal suffixes go; shouting is softened."""
     name = (raw or "").strip()
-    for _ in range(2):
+    for _ in range(3):
         name = _LEGAL_SUFFIX.sub("", name).strip(" ,.")
-    if name.isupper():
+    if name.upper() == name:
         # Short all-caps words are usually acronyms (CFGI, DBS, AI); keep those.
-        name = " ".join(w if len(w) <= 4 else w.capitalize() for w in name.split())
+        name = " ".join(w if len(w) <= 4 and w.lower() not in _COMMON_SHORT else w.title()
+                        for w in name.split())
     return name
 
 
@@ -78,10 +97,12 @@ def _to_posting(job: dict) -> Posting | None:
         compensation=_salary(job),
         needs_detail=True,
     )
-    if hiring and posted_by and hiring.lower() != posted_by.lower():
+    p.extra["posted_by"] = posted_by
+    p.extra["names_employer"] = bool(hiring) and hiring.lower() != posted_by.lower()
+    if p.extra["names_employer"]:
         p.extra["note"] = f"posted by {posted_by} on behalf of {hiring}"
-    elif not hiring and _AGENCY.search(posted_by):
-        p.extra["note"] = f"posted by {posted_by}, which may be a recruitment agency with an unnamed client"
+    if _AGENCY.search(posted_by):
+        p.extra["agency"] = True
     _apply_meta(p, job)
     return p
 
@@ -115,6 +136,12 @@ def parse_detail(data: dict, posting: Posting) -> None:
         # Stated as a sentence so the usual experience extraction picks it up.
         posting.description = (f"Minimum experience: {posting.extra['min_years']} years of experience "
                                f"(MyCareersFuture field).\n\n{posting.description}")
+    if _EA_LICENCE.search(posting.description):
+        posting.extra["agency"] = True
+    if posting.extra.get("agency") and not posting.extra.get("names_employer"):
+        # An agency ad that doesn't say who the employer is: out of scope by the criteria,
+        # and not an ad the employer could use for an Employment Pass anyway.
+        posting.extra["drop"] = "recruitment agency, employer not named"
     status = ((data.get("status") or {}).get("jobStatus") or "").lower()
     if status and status not in ("open", "re-open", "reopen"):
         posting.extra["closed"] = True
