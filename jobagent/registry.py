@@ -12,6 +12,9 @@ from datetime import date
 
 from . import config
 from .ats import Board, detect_board
+from .ats import mycareersfuture
+
+BUILTIN_SOURCES = [mycareersfuture.BOARD]
 
 
 @dataclass
@@ -47,11 +50,15 @@ class Registry:
 
     @classmethod
     def load(cls) -> "Registry":
-        if not config.BOARDS_CSV.exists():
-            return cls([])
-        with open(config.BOARDS_CSV, newline="", encoding="utf-8") as f:
-            return cls([Entry(**{k: v for k, v in row.items() if k in COLUMNS})
-                        for row in csv.DictReader(f)])
+        entries = []
+        if config.BOARDS_CSV.exists():
+            with open(config.BOARDS_CSV, newline="", encoding="utf-8") as f:
+                entries = [Entry(**{k: v for k, v in row.items() if k in COLUMNS})
+                           for row in csv.DictReader(f)]
+        reg = cls(entries)
+        for board in BUILTIN_SOURCES:  # search sources that aren't found by discovery
+            reg.add(board, board.company, source="builtin")
+        return reg
 
     def save(self) -> None:
         config.BOARDS_CSV.parent.mkdir(parents=True, exist_ok=True)

@@ -37,18 +37,37 @@ class Run:
         self.skipped = Counter()
         self.recorded_by_market = Counter()
         self.recorded_by_company = Counter()
+        self.by_role: dict[str, str] = {}
         self.registered: list[str] = []
         self.board_results: list[BoardResult] = []
         self.probed = 0
         self.harvest_text = ""  # snapshot of the harvest, taken before the model starts
 
     def absorb(self, results: list[BoardResult]) -> None:
+        """Add harvested candidates, keeping one copy of a job listed in several places.
+
+        A role on both a company's own board and MyCareersFuture is kept as the board
+        version (fuller detail); a role already in the tracker is dropped.
+        """
+        tracked = {store.role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
+                   for j in store.read_jobs()}
         for r in results:
             self.board_results.append(r)
             self.registry.record_check(r.board.key, ok=r.ok, status=r.error,
                                        postings=r.postings, candidates=len(r.candidates))
             for c in r.candidates:
-                self.pool.setdefault(c.id, c)
+                rk = store.role_key(c.company, c.title) + "|" + c.market
+                if rk in tracked or c.id in self.pool:
+                    continue
+                other = self.by_role.get(rk)
+                if other and other in self.pool:
+                    if self.pool[other].board_key.startswith("mycareersfuture") and \
+                            not c.board_key.startswith("mycareersfuture"):
+                        del self.pool[other]
+                    else:
+                        continue
+                self.pool[c.id] = c
+                self.by_role[rk] = c.id
 
     def open_candidates(self, market: str = "") -> list[Candidate]:
         return rank([c for c in self.pool.values() if c.id not in self.decided
@@ -106,14 +125,18 @@ SKIP_SCHEMA = {
 
 def build_tools(run: Run):
     @tool("get_candidates", "List undecided candidates from the harvested pool for one market, best "
-          "first. Markets: India, Singapore, Canada, Remote (unspecified), Unknown, United States.",
+          "first. Markets: India, Singapore, Canada, Remote (unspecified), Unknown, United States. "
+          "Optionally only those from one source (e.g. 'mycareersfuture').",
           {"type": "object", "properties": {
               "market": {"type": "string"},
+              "source": {"type": "string", "description": "Optional: an adapter name, e.g. 'mycareersfuture'"},
               "offset": {"type": "integer", "default": 0},
               "limit": {"type": "integer", "default": 15}},
            "required": ["market"]})
     async def get_candidates(args):
         items = run.open_candidates(args["market"])
+        if args.get("source"):
+            items = [c for c in items if c.board_key.startswith(args["source"].lower() + ":")]
         off, lim = int(args.get("offset") or 0), min(int(args.get("limit") or 15), 30)
         return text_result({"market": args["market"], "total_open": len(items), "offset": off,
                             "candidates": [c.summary() for c in items[off: off + lim]],
@@ -139,6 +162,9 @@ def build_tools(run: Run):
         room = config.MAX_NEW_JOBS - run.recorded
         us_room = config.MAX_US_JOBS - run.recorded_by_market["United States"]
         company_used = Counter(run.recorded_by_company)
+        market_used = Counter(run.recorded_by_market)
+        share = max(1, int(config.MAX_NEW_JOBS * config.TOP_MARKET_SHARE))
+        batch_ids = {j.get("candidate_id") for j in args.get("jobs") or []}
         jobs, refused = [], []
         for job in args.get("jobs") or []:
             cid = job.pop("candidate_id", "") or ""
@@ -166,13 +192,21 @@ def build_tools(run: Run):
                                     "reason": f"United States cap ({config.MAX_US_JOBS}) reached for this run"})
                     continue
                 us_room -= 1
-            company = store.role_key(job["company"], "").rstrip("|")
+            if job["market"] in config.TOP_MARKETS and market_used[job["market"]] >= share:
+                other = next(m for m in config.TOP_MARKETS if m != job["market"])
+                if any(c2.id not in batch_ids for c2 in run.open_candidates(other)):
+                    refused.append({"role": job.get("role"),
+                                    "reason": f"{job['market']} has its share ({share}) while {other} "
+                                              f"still has candidates; judge {other} next"})
+                    continue
+            company = store.company_key(job["company"])
             if company_used[company] >= config.MAX_PER_COMPANY:
                 refused.append({"role": job.get("role"),
                                 "reason": f"{job['company']} already has {config.MAX_PER_COMPANY} this run; "
                                           "leave its other roles undecided for a later run"})
                 continue
             company_used[company] += 1
+            market_used[job["market"]] += 1
             job["_company"] = company
             job["_board"] = c.board_key if c else ""
             jobs.append(job)
@@ -351,6 +385,7 @@ async def main() -> int:
     system_prompt = SYSTEM_PROMPT.format(
         today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS, max_us=config.MAX_US_JOBS,
         max_company=config.MAX_PER_COMPANY,
+        share=max(1, int(config.MAX_NEW_JOBS * config.TOP_MARKET_SHARE)),
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))
 

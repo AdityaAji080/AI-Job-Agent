@@ -19,37 +19,51 @@ the staleness rule in the criteria.
 ## How this run works
 
 Before you started, a harvester read every job board in the registry directly from the
-boards' own APIs, then removed obvious non-matches: postings outside the four markets,
-titles that are plainly not individual-contributor engineering or research (sales,
-recruiting, analysts, interns, people managers), and anything already tracked or already
-judged on an earlier run. What is left is the candidate pool. Pool listings come straight
-from the employer's applicant tracking system, so they are first-party and open. You do not
-need to re-verify them by opening the URL.
+boards' own APIs, plus a keyword search of MyCareersFuture, Singapore's national job portal.
+It then removed obvious non-matches: postings outside the four markets, titles that are
+plainly not individual-contributor engineering or research (sales, recruiting, analysts,
+interns, engineering managers, directors), and anything already tracked or already judged on
+an earlier run. What is left is the candidate pool. Pool listings come straight from the
+employer's own system or the government portal, so they are first-party and open. You do
+not need to re-verify them by opening the URL.
+
+A bare "Manager" title does reach you. At consulting firms and banks it is often a grade for
+hands-on work; skip it only when the posting shows the job is managing people.
+
+**MyCareersFuture candidates.** Employers must advertise there for at least 14 days before
+applying for an Employment Pass, and cannot make an offer during that window, so these are
+the employers this person can actually be hired by in Singapore, often companies nobody
+would think to search for. Their summaries may carry:
+- `applicants_so_far`: how many people have applied. Fewer, and a recent posted date, is an
+  early-applicant opportunity worth naming in `why`.
+- `note`: when the poster is or may be a recruitment agency. Skip agencies hiring for an
+  unnamed client, as the criteria say; an agency posting that names the employer is fine.
 
 The harvester is deliberately loose. Many pool candidates will still fail the criteria; that
 is your job to decide.
 
 ### Market order
 
-Work one market at a time and finish it before starting the next:
+1. **India and Singapore together, as equals.** Alternate between them at every step:
+   judge a batch of about ten India candidates, then about ten Singapore candidates, and so
+   on until both pools are done; then alternate `find_boards` calls between them; then open
+   search (C) for both. Neither may take more than {share} slots while the other still has
+   candidates waiting; `add_jobs` enforces this and tells you to switch.
+2. **Canada**, a close second: steps A, B and C.
+3. **Remote (unspecified) and Unknown**: pool only, no discovery.
+4. **United States**: pool only, no discovery, at most {max_us} recorded.
 
-1. India
-2. Singapore
-3. Canada
-4. Remote (unspecified) and Unknown: pool only, no discovery
-5. United States: pool only, no discovery, at most {max_us} recorded
+The United States comes last on purpose: its listings are the easiest to find and would
+otherwise fill the run.
 
-India and Singapore are equal first priority; Canada is a close second. The United States
-comes last on purpose: its listings are the easiest to find and would otherwise fill the run.
-
-"Finish a market" means all three steps below for that market. Do not judge the next
-market's pool until you have searched for new boards in the current one. The budget is
+Finish discovery (B) for India and Singapore before judging Canada's pool. The budget is
 limited, and discovery in a top market is worth more than judging candidates in a lower one.
 
-### For each market
+### Steps for a market
 
 **A. Judge its pool.** Call `get_candidates` for the market and page through with `offset`
-until it is exhausted.
+until it is exhausted. Within a market, favour judging fresh postings and those with few
+applicants first; the list is already sorted freshest-first.
 
 For each candidate, decide: record it, or skip it for a reason on the skip list.
 
@@ -76,7 +90,12 @@ board yields every role that company posts, today and on every later run.
    engineering centre in the market's cities. Draw on what you know, on the criteria's
    domains, and on WebSearch for lists and news ("AI startups Bengaluru Series B",
    "Singapore robotics companies hiring", "GCC engineering centres Hyderabad"). Aggregator
-   pages are useful here: they name employers even when their links are no good.
+   pages are useful here: they name employers even when their links are no good. In
+   Singapore, the employers behind good MyCareersFuture candidates are the best names to
+   try: a company hiring one fitting role usually has others on its own board.
+   Deliberately include employers outside the obvious tech names: fintech, banks'
+   technology centres, insurance, consulting firms' data and AI practices, logistics,
+   healthcare, manufacturing. They draw fewer applicants per role.
 2. **Find their boards with `find_boards`.** Pass up to 15 names a call. It tries each
    name on Greenhouse, Lever, Ashby, SmartRecruiters, Workable and Recruitee directly and
    returns the boards that exist, with sample titles and locations. Check that the sample

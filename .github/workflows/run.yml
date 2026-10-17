@@ -60,6 +60,7 @@ jobs:
           MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '25' }}
           MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '5' }}
           MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '3' }}
+          JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
 
       - name: Save results to the data repository

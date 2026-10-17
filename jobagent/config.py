@@ -30,6 +30,10 @@ MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "5"))
 # One large board (a university, a big employer) shouldn't fill a run on its own.
 # Roles past the cap stay in the pool for later runs.
 MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "3"))
+# India and Singapore share first priority. Neither may take more than this share of
+# the run's slots while the other still has candidates waiting; spare slots flow over.
+TOP_MARKETS = ("India", "Singapore")
+TOP_MARKET_SHARE = float(os.environ.get("TOP_MARKET_SHARE", "0.4"))
 MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "5.00"))
 MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
 
@@ -45,7 +49,19 @@ WORKDAY_SEARCH_TERMS = [
     "research engineer", "robotics", "embedded", "perception",
 ]
 WORKDAY_MAX_PER_TERM = 60
-DESCRIPTION_CHARS = 12000  # how much of a posting the model sees per get_posting
+DESCRIPTION_CHARS = 12000
+
+# --- MyCareersFuture (Singapore's national job portal) -------------------------
+# Employers must advertise there for 14 days before applying for an Employment Pass,
+# so it covers the long tail of Singapore employers, early in each posting's life.
+MCF_SEARCH_TERMS = [
+    "machine learning", "artificial intelligence", "AI engineer", "deep learning",
+    "computer vision", "LLM", "generative AI", "NLP", "MLOps", "data scientist",
+    "research engineer", "robotics", "embedded software", "software engineer",
+    "backend engineer", "solutions engineer",
+]
+MCF_PAGES_PER_TERM = 3      # x 50 results per page
+MCF_MAX_AGE_DAYS = 45       # postings older than this are ignored at harvest  # how much of a posting the model sees per get_posting
 
 # --- Title prefilter ----------------------------------------------------------
 # A title must match INCLUDE and must not match EXCLUDE. Deliberately loose:
@@ -68,9 +84,12 @@ TITLE_EXCLUDE = re.compile(
     r"(business|sales|revenue|people|marketing|warehouse|terminal|fleet|store) operations|"
     r"operations (manager|associate|analyst|specialist|coordinator)|"
     r"(product|program|project|office|facilities) manager|"
-    # People-management and leadership roles. Any title naming the role itself as a
-    # manager, director or head is a different job from IC engineering at 2 years in.
-    r"\bmanager\b|\bdirector\b|\bhead of\b|\bvp\b|vice president|"
+    # Clear people-management and leadership titles. A bare "Manager" is left for the
+    # model: at consulting firms and banks it is a grade, not a people-management job.
+    r"engineering manager|manager,? (of )?(software )?engineering|"
+    r"(success|delivery|partner|vendor|relationship|portfolio|community|content|channel|"
+    r"category|brand|procurement|supply chain) manager|"
+    r"\bdirector\b|\bhead of\b|\bvp\b|vice president|"
     r"salesforce|\bgtm\b|go-to-market|technical (writer|writing|documentation)|"
     r"technician|mechanic|electrician|driver\b|"
     r"(graphic|visual|ux|ui|product) designer",

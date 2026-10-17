@@ -12,10 +12,11 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
-from . import ashby, greenhouse, lever, recruitee, smartrecruiters, workable, workday
+from . import ashby, greenhouse, lever, mycareersfuture, recruitee, smartrecruiters, workable, workday
 from .base import Board, BoardError, Posting  # noqa: F401  (re-exported)
 
-ADAPTERS = {m.NAME: m for m in (greenhouse, lever, ashby, smartrecruiters, workable, recruitee, workday)}
+ADAPTERS = {m.NAME: m for m in (greenhouse, lever, ashby, smartrecruiters, workable, recruitee, workday,
+                                 mycareersfuture)}
 
 # Systems we recognise but cannot read through a public API. Roles on these are
 # still recordable; the agent opens them with WebFetch instead.

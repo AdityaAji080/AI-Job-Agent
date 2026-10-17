@@ -66,3 +66,19 @@ WORKDAY_DETAIL = {"jobPostingInfo": {
     "jobDescription": "<p>8+ years of experience building CUDA kernels.</p>", "location": "India, Bengaluru",
     "startDate": "2026-10-13", "canApply": True,
     "externalUrl": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/India-Bengaluru/Senior-DL-Engineer_JR1999"}}
+
+MCF_SEARCH = {"total": 2, "results": [
+    {"uuid": "abc123", "title": "AI Engineer (LLM Applications)",
+     "postedCompany": {"name": "CFGI SINGAPORE PTE. LTD."},
+     "salary": {"minimum": 6000, "maximum": 9000, "type": {"salaryType": "Monthly"}},
+     "metadata": {"jobPostId": "MCF-2026-0123456", "newPostingDate": "2026-10-14",
+                  "jobDetailsUrl": "https://www.mycareersfuture.gov.sg/job/information-technology/ai-engineer-cfgi-abc123"},
+     "address": {"districts": [{"location": "Raffles Place", "region": "Central"}]}},
+    {"uuid": "def456", "title": "Machine Learning Engineer",
+     "postedCompany": {"name": "BEST TALENT RECRUITMENT PTE. LTD."},
+     "metadata": {"newPostingDate": "2026-10-15", "jobDetailsUrl": "https://www.mycareersfuture.gov.sg/job/x-def456"},
+     "address": {}},
+]}
+MCF_DETAIL = {"uuid": "abc123", "description": "<p>Build LLM tools for finance teams.</p>",
+              "minimumYearsExperience": 3, "status": {"jobStatus": "Open"},
+              "metadata": {"totalNumberJobApplication": 7, "expiryDate": "2099-11-13"}}

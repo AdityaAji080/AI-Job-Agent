@@ -35,6 +35,8 @@ class Candidate:
     experience_hints: list[str]
     phd_hint: str
     looks_stale: bool
+    applicants: int | None = None
+    note: str = ""
 
     def summary(self) -> dict:
         """The compact view the model scans; get_posting returns the full text."""
@@ -50,10 +52,14 @@ class Candidate:
             out["experience_mentions"] = self.experience_hints
         if self.phd_hint:
             out["phd_mention"] = self.phd_hint
+        if self.applicants is not None:
+            out["applicants_so_far"] = self.applicants
+        if self.note:
+            out["note"] = self.note
         if self.looks_stale:
             out["stale_check"] = f"posted >{config.STALE_DAYS} days ago and names no current/future year"
         if not self.description:
-            out["note"] = "no description from the board API; open the url to read it"
+            out["description"] = "none from the source; open the url to read it"
         return out
 
 
@@ -77,6 +83,7 @@ def to_candidate(p: Posting, board: Board) -> Candidate:
         age_days=age, url=p.url, apply_url=p.apply_url, compensation=p.compensation,
         description=text, experience_hints=filters.experience_hints(text),
         phd_hint=filters.phd_hint(text), looks_stale=stale,
+        applicants=p.extra.get("applicants"), note=p.extra.get("note", ""),
     )
 
 

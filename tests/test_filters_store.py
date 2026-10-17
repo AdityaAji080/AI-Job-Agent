@@ -43,7 +43,8 @@ def test_experience_range(hint, expected):
     ("Software Engineering Intern", False), ("Account Executive, AI", False),
     ("Technical Recruiter", False), ("Data Analyst", False), ("Product Manager, AI", False),
     ("Terminal Operations Manager", False), ("Office Manager", False),
-    ("Staff Machine Learning Manager", False), ("Director, Fleet Solutions", False),
+    ("Staff Machine Learning Manager", True), ("Data & AI - Manager", True),  # left to the model
+    ("Director, Fleet Solutions", False), ("Manager, Software Engineering", False),
     ("Lead Salesforce Developer, GTM Systems", False), ("AI Success Manager (US East)", False),
     ("Content Systems Engineer, Technical Documentation", False), ("Engineering Manager II", False),
     ("Lead Site Reliability Engineer", True), ("Staff Engineer I", True), ("Applied AI Architect", True),

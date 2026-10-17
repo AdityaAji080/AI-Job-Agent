@@ -41,6 +41,10 @@ flowchart LR
   Workable, Recruitee and Workday all expose public JSON for their job boards. Reading
   those returns every open role at a company in one request, with first-party dates,
   locations, salaries and descriptions. No scraping, no rendering, no model calls.
+- **Singapore's national job portal covers the long tail.** Employers must advertise on
+  MyCareersFuture for 14 days before applying for an Employment Pass, so a keyword search
+  there reaches employers nobody would think to look for, early in each posting's life,
+  with a running count of applicants. Its employers also feed board discovery.
 - **A cheap prefilter removes the obvious.** Postings outside the target countries,
   non-engineering titles, and anything already tracked or judged never reach the model.
   It is deliberately loose: when unsure, it keeps the posting.
@@ -54,8 +58,10 @@ flowchart LR
   they're a fallback). A confirmed board is registered and harvested on the spot and on every
   later run, so one discovered company is worth every role it ever posts. Discovery doesn't
   use up the run's job slots, so it continues after they're full.
-- **No single source dominates.** Markets are worked in priority order with a cap on US
-  jobs, and no company can take more than three slots in a run; the rest wait in the pool.
+- **No single source dominates.** India and Singapore are worked as equals, each limited
+  to a share of the run while the other has candidates waiting; Canada follows, the US is
+  capped, and no company can take more than three slots in a run. The rest wait in the pool.
+  A job listed both on a company's board and on MyCareersFuture is judged once.
 - **Roles on unsupported systems still count.** For employers on Darwinbox, Keka, iCIMS
   and the like, the agent falls back to search and fetch, with explicit verification
   rules (employer page over aggregator, never construct a URL).
@@ -64,7 +70,7 @@ flowchart LR
 
 ```
 jobagent/
-  ats/            one adapter per job-board system: URL detection, payload parsing, fetching
+  ats/            one adapter per job-board system (and MyCareersFuture): parsing, fetching
   harvest.py      reads all boards concurrently, prefilters, ranks; runnable on its own
   filters.py      market classification, title filter, experience/PhD/staleness hints
   registry.py     boards.csv: every board found, with health and yield stats
@@ -98,7 +104,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Secret `DATA_REPO_TOKEN`: the token from step 2
    - Variable `DATA_REPO`: `your-username/job-agent-data`
    - Optional variables `MAX_BUDGET_USD` (default 5.00), `MAX_NEW_JOBS` (default 25),
-     `MAX_US_JOBS` (default 5) and `MAX_PER_COMPANY` (default 3)
+     `MAX_US_JOBS` (default 5), `MAX_PER_COMPANY` (default 3), `TOP_MARKET_SHARE`
+     (default 0.4) and `JOBAGENT_MODEL` (default `sonnet`; set to `opus` for the larger model)
 
 4. **Check the boards first.** Actions → Job search run → Run workflow → *harvest-only*.
    This reads every board and prints the pool without calling the model.

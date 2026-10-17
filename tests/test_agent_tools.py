@@ -93,3 +93,50 @@ def test_is_known(tmp_path, monkeypatch):
     store.mark_seen([{"url": "https://x.com/1"}])
     assert call(tools, "is_known", {"urls": ["https://x.com/1", "https://x.com/2"]}) == {
         "https://x.com/1": True, "https://x.com/2": False}
+
+
+def _pool(run, board, specs):
+    from jobagent.harvest import BoardResult, to_candidate
+    posts = [Posting(board.ats, board.slug, comp, str(i), title, f"https://x.com/{board.slug}/{i}", location=loc,
+                     description="Build things.") for i, (comp, title, loc) in enumerate(specs)]
+    run.absorb([BoardResult(board, ok=True, postings=len(posts), candidates=[to_candidate(p, board) for p in posts])])
+
+
+def test_india_singapore_share_with_overflow(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 10)
+    monkeypatch.setattr(config, "TOP_MARKET_SHARE", 0.2)  # share = 2
+    monkeypatch.setattr(config, "MAX_PER_COMPANY", 10)
+    _pool(run, Board("lever", "in"), [(f"In{i}", "ML Engineer", "Bengaluru") for i in range(4)])
+    _pool(run, Board("lever", "sg"), [("Sg", "ML Engineer", "Singapore")])
+    india = [c.id for c in run.open_candidates("India")]
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in india]})
+    assert res["added"] == 2 and "judge Singapore next" in res["rejected"][0]["reason"]
+    sg = run.open_candidates("Singapore")[0].id
+    call(tools, "add_jobs", {"jobs": [{"candidate_id": sg, "why": "x"}]})
+    # Singapore is exhausted, so India's spare candidates may now overflow its share.
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in india[2:]]})
+    assert res["added"] == 2
+
+
+def test_same_role_on_board_and_mcf_is_kept_once(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    _pool(run, Board("mycareersfuture", "sg"), [("CFGI Singapore Pte Ltd", "AI Engineer", "Singapore")])
+    _pool(run, Board("lever", "cfgi"), [("CFGI", "AI Engineer", "Singapore")])
+    pool = run.open_candidates("Singapore")
+    assert len(pool) == 1 and pool[0].board_key == "lever:cfgi"  # the company's own board wins
+    call(tools, "add_jobs", {"jobs": [{"candidate_id": pool[0].id, "why": "x"}]})
+    run2 = agent.Run(run.registry)  # next run: the MCF copy of a tracked job is not offered again
+    _pool(run2, Board("mycareersfuture", "sg"), [("CFGI SINGAPORE PTE. LTD.", "AI Engineer", "Singapore")])
+    assert run2.open_candidates() == []
+
+
+def test_emptied_files_start_fresh(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=1)
+    config.JOBS_CSV.write_text("", encoding="utf-8")
+    config.SEEN_CSV.write_text("", encoding="utf-8")
+    store.mark_seen([{"url": "https://s.com/1", "reason": "x"}])
+    assert store.read_seen()[0]["reason"] == "x"
+    call(tools, "add_jobs", {"jobs": [{"candidate_id": next(iter(run.pool)), "why": "x"}]})
+    assert config.JOBS_CSV.read_text(encoding="utf-8").startswith("date_added,company")
+    assert len(store.read_jobs()) == 1

@@ -30,9 +30,20 @@ def job_key(url: str) -> str:
     return host + path + ("?" + "&".join(f"{k}={v}" for k, v in ids) if ids else "")
 
 
+_LEGAL = re.compile(r"\b(pte|private|ltd|limited|llp|llc|inc|corp|corporation|co|plc|gmbh|"
+                   r"singapore|india|canada|technologies|technology)\b")
+
+
+def company_key(company: str) -> str:
+    """'CFGI Singapore Pte. Ltd.' and 'CFGI' compare equal."""
+    text = re.sub(r"[^a-z0-9]+", " ", (company or "").lower())
+    core = _LEGAL.sub(" ", text).split()
+    return " ".join(core) or text.strip()
+
+
 def role_key(company: str, role: str) -> str:
     norm = lambda s: re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
-    return f"{norm(company)}|{norm(role)}"
+    return f"{company_key(company)}|{norm(role)}"
 
 
 def _read(path: Path) -> list[dict]:
@@ -44,11 +55,11 @@ def _read(path: Path) -> list[dict]:
 
 def _append(path: Path, columns: list[str], rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.exists()
+    new = not path.exists() or path.stat().st_size == 0  # an emptied file counts as new
     if not new:  # follow the file's own header, so columns you added stay aligned
         with open(path, newline="", encoding="utf-8") as f:
             columns = next(csv.reader(f), None) or columns
-    with open(path, "a", newline="", encoding="utf-8") as f:
+    with open(path, "w" if new else "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         if new:
             writer.writeheader()
@@ -61,8 +72,8 @@ def ensure_schema() -> None:
     Existing values (including your status and applied edits) are kept; new columns start empty.
     """
     path = config.JOBS_CSV
-    if not path.exists():
-        return
+    if not path.exists() or path.stat().st_size == 0:
+        return  # _append writes a fresh header
     with open(path, newline="", encoding="utf-8") as f:
         header = next(csv.reader(f), [])
     if header == COLUMNS:
@@ -93,12 +104,12 @@ def append_jobs(jobs: list[dict]) -> dict:
     ensure_schema()
     existing = read_jobs()
     keys = {job_key(j.get("url", "")) for j in existing}
-    roles = {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("location") or "").lower()
+    roles = {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
              for j in existing}
     added, rejected = [], []
     for job in jobs:
         key = job_key(job.get("url", ""))
-        rk = role_key(job.get("company", ""), job.get("role", "")) + "|" + (job.get("location") or "").lower()
+        rk = role_key(job.get("company", ""), job.get("role", "")) + "|" + (job.get("market") or "")
         if not key:
             rejected.append({"role": job.get("role"), "reason": "no url"})
             continue
