@@ -38,6 +38,8 @@ class Candidate:
     looks_stale: bool
     applicants: int | None = None
     note: str = ""
+    fit: int = 0
+    fit_terms: list[str] = field(default_factory=list)
 
     def summary(self) -> dict:
         """The compact view the model scans; get_posting returns the full text."""
@@ -53,6 +55,8 @@ class Candidate:
             out["experience_mentions"] = self.experience_hints
         if self.phd_hint:
             out["phd_mention"] = self.phd_hint
+        if self.fit_terms:
+            out["matches_profile"] = self.fit_terms[:6]
         if self.applicants is not None:
             out["applicants_so_far"] = self.applicants
         if self.note:
@@ -79,6 +83,7 @@ def to_candidate(p: Posting, board: Board) -> Candidate:
     age = filters.age_days(p.posted)
     stale = (age is not None and age > config.STALE_DAYS
              and not filters.mentions_future_date(text + " " + p.title))
+    fit, terms = filters.fit_score(p.title, text)
     return Candidate(
         id=p.id, board_key=board.key, company=p.company, title=p.title, location=p.location,
         market=filters.market_of(p.location, p.remote), posted=p.posted, posted_note=p.posted_note,
@@ -86,6 +91,7 @@ def to_candidate(p: Posting, board: Board) -> Candidate:
         description=text, experience_hints=filters.experience_hints(text),
         phd_hint=filters.phd_hint(text), looks_stale=stale,
         applicants=p.extra.get("applicants"), note=p.extra.get("note", ""),
+        fit=fit, fit_terms=terms,
     )
 
 
@@ -135,10 +141,30 @@ async def harvest(boards: list[Board], known: set[str]) -> list[BoardResult]:
         return await asyncio.gather(*(harvest_board(client, b, known, sem) for b in boards))
 
 
+def _age(c: Candidate) -> int:
+    return c.age_days if c.age_days is not None else 10_000
+
+
 def rank(candidates: list[Candidate]) -> list[Candidate]:
-    """Market priority first, then freshest first, undated last within a market."""
-    return sorted(candidates, key=lambda c: (filters.market_rank(c.market), c.looks_stale,
-                                             c.age_days if c.age_days is not None else 10_000))
+    """Market priority first, then not-stale before stale. Within each of those groups the
+    order alternates between the best fit to the profile and the freshest posting, so
+    strong keyword matches come early without burying fresh generic roles (a plain
+    "AI Engineer" or "Software Engineer") that the keywords don't describe."""
+    groups: dict[tuple, list[Candidate]] = {}
+    for c in candidates:
+        groups.setdefault((filters.market_rank(c.market), c.looks_stale), []).append(c)
+    out: list[Candidate] = []
+    for key in sorted(groups):
+        group = groups[key]
+        by_fit = sorted(group, key=lambda c: (-(min(c.fit, 15) // 4), _age(c)))
+        by_fresh = sorted(group, key=_age)
+        seen: set[str] = set()
+        for pair in zip(by_fit, by_fresh):
+            for c in pair:
+                if c.id not in seen:
+                    seen.add(c.id)
+                    out.append(c)
+    return out
 
 
 def _main() -> int:

@@ -16,6 +16,8 @@ DATA_DIR = HOME / "data"
 
 RESUME_PATH = PROFILE_DIR / "resume.md"
 CRITERIA_PATH = PROFILE_DIR / "criteria.md"
+# Optional. One "weight  regex" per line; used to put the best-fitting jobs first.
+FIT_KEYWORDS_PATH = PROFILE_DIR / "fit_keywords.txt"
 
 JOBS_CSV = DATA_DIR / "jobs.csv"
 SEEN_CSV = DATA_DIR / "seen.csv"
@@ -114,7 +116,8 @@ MARKET_TIERS = {
 # so this follows the priority tiers.
 MARKETS: list[tuple[str, re.Pattern]] = [
     ("India", re.compile(
-        r"\bindia\b|bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|noida|hyderabad|"
+        # "Little India" is a district of Singapore, not the country.
+        r"(?<!little )\bindia\b|bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|noida|hyderabad|"
         r"pune|chennai|kochi|thiruvananthapuram|trivandrum|ahmedabad|kolkata", re.I)),
     ("Singapore", re.compile(r"singapore", re.I)),
     ("Canada", re.compile(

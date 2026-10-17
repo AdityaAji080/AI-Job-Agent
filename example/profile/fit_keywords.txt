@@ -1,0 +1,21 @@
+# Example: what makes a job a strong fit. Copy to your private profile/ and edit.
+# One rule per line: <weight> <regex>. Title matches count 3x. Only affects ordering, never filters.
+
+# Research: synthetic media detection, diffusion models, evaluation
+3 synthetic media|deepfake|ai[- ]generated (content|image|media)|content (safety|integrity|provenance)|media forensics|diffusion
+3 \bevals?\b|evaluation|benchmark
+
+# Role shapes that fit the background
+3 forward[- ]deployed|deployment engineer|deployed (ai |software )?engineer|applied ai engineer|solutions engineer|customer engineer
+3 computer vision|perception|image (recognition|classification|understanding)
+3 \bllms?\b|large language model|agentic|ai agents?|generative ai|genai
+
+# Systems experience from the terminal work
+2 real[- ]time|embedded|firmware|safety[- ]critical|fault[- ]toleran|high[- ]availability
+2 robotic|autonomous|autonomy|\bros2?\b|slam|sensor fusion|\bgnss\b|\bgps\b|lidar
+2 c\+\+|\brust\b
+
+# Tools and adjacent work
+1 pytorch|hugging ?face|opencv
+1 inference|model serving|mlops
+1 maritime|container terminal|port operations|logistics

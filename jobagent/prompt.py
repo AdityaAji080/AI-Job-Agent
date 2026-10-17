@@ -63,8 +63,11 @@ limited, and discovery in a top market is worth more than judging candidates in 
 ### Steps for a market
 
 **A. Judge its pool.** Call `get_candidates` for the market and page through with `offset`
-until it is exhausted. Within a market, favour judging fresh postings and those with few
-applicants first; the list is already sorted freshest-first.
+until it is exhausted. The list alternates between the best keyword matches to the profile
+(`matches_profile`) and the freshest postings, so work from the top. A generic role (a plain
+"AI Engineer" or "Software Engineer" with no special keywords) is as recordable as a
+specialised one when it fits the role shape; keywords only help decide what to look at
+first. A strong match about to pass the staleness limit should be decided this run.
 
 For each candidate, decide: record it, or skip it for a reason on the skip list.
 
@@ -104,6 +107,11 @@ board yields every role that company posts, today and on every later run.
    its `board_url` to `register_board`.
 3. **`register_board`** adds the whole board to the registry and returns its new
    candidates straight away. Judge them exactly as in A while slots remain.
+
+Registering a board costs no slots. Register every board you have confirmed belongs to the
+right company, straight away, even when the run limit or a market's share is already
+reached; its candidates simply wait for the next run. A confirmed board left unregistered
+is lost discovery work.
 
 `site:` searches against job-board domains (`site:jobs.ashbyhq.com Bengaluru "machine
 learning"`) and `site:myworkdayjobs.com` for Workday, which `find_boards` cannot probe,

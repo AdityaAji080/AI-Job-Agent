@@ -39,6 +39,45 @@ def title_ok(title: str) -> bool:
 
 _YEARS = re.compile(
     r"(\d{1,2})\s*(?:\+|plus)?\s*(?:(?:-|–|to)\s*(\d{1,2})\s*\+?)?\s*(?:years?|yrs?)", re.I)
+_FIT_RULES: list[tuple[int, re.Pattern]] | None = None
+
+
+def fit_rules() -> list[tuple[int, re.Pattern]]:
+    """Read profile/fit_keywords.txt once: lines of '<weight> <regex>', '#' for comments."""
+    global _FIT_RULES
+    if _FIT_RULES is None:
+        _FIT_RULES = []
+        path = config.FIT_KEYWORDS_PATH
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                weight, _, pattern = line.partition(" ")
+                try:
+                    _FIT_RULES.append((int(weight), re.compile(pattern.strip(), re.I)))
+                except (ValueError, re.error):
+                    continue  # a bad line shouldn't stop a run
+    return _FIT_RULES
+
+
+def fit_score(title: str, description: str) -> tuple[int, list[str]]:
+    """How well a posting matches the profile's keywords. A title hit counts three times
+    a description hit; each rule counts once. Returns (score, matched terms)."""
+    score, terms = 0, []
+    for weight, rx in fit_rules():
+        m = rx.search(title or "")
+        if m:
+            score += 3 * weight
+        else:
+            m = rx.search(description or "")
+            if m:
+                score += weight
+        if m:
+            terms.append(m.group(0).lower())
+    return score, terms
+
+
 def experience_range(hints: list[str]) -> str:
     """Short form of the first stated requirement, e.g. '5–10 yrs' or '3+ yrs'. For the tracker column."""
     for hint in hints:

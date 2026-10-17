@@ -92,6 +92,7 @@ Personal files live in a **separate private repository**, so this one can be pub
    ```
    profile/resume.md      your resume, as plain text or markdown
    profile/criteria.md    what you want, and the skip list (see example/profile)
+   profile/fit_keywords.txt  optional: weighted keywords that put the best-fitting jobs first
    data/                  created on the first run
    ```
 

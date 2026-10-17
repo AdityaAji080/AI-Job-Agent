@@ -14,6 +14,7 @@ from jobagent.harvest import prefilter, rank, to_candidate
     ("London, UK", "Other"), ("Berlin / Remote", "Other"), ("London; Bengaluru", "India"),
     ("Remote", "Remote (unspecified)"), ("", "Unknown"), ("HQ", "Unknown"),
     ("Toronto / Singapore", "Singapore"), ("Singapore / Bengaluru", "India"),
+    ("Singapore (D08 Little India, Farrer Park)", "Singapore"),
 ])
 def test_market_of(loc, market):
     assert filters.market_of(loc) == market
@@ -124,3 +125,49 @@ def test_old_tracker_is_upgraded_in_place(tmp_path, monkeypatch):
     assert (rows[0]["status"], rows[0]["applied"], rows[0]["my_notes"], rows[0]["experience"]) == (
         "interviewing", "Yes", "called recruiter", "")
     assert (rows[1]["company"], rows[1]["experience"], rows[1]["my_notes"]) == ("Beta", "5–10 yrs", "")
+
+
+def test_fit_score_and_ranking(tmp_path, monkeypatch):
+    rules = tmp_path / "fit.txt"
+    rules.write_text("# comment\n3 computer vision|perception\n2 c\\+\\+\nbad line\n1 pytorch\n", encoding="utf-8")
+    monkeypatch.setattr(config, "FIT_KEYWORDS_PATH", rules)
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+    score, terms = filters.fit_score("Computer Vision Engineer", "C++ and PyTorch.")
+    assert score == 3 * 3 + 2 + 1 and terms == ["computer vision", "c++", "pytorch"]
+
+    b = Board("lever", "x", "X")
+    today = date.today()
+    fresh_weak = to_candidate(Posting("lever", "x", "X", "1", "Backend Engineer", "https://a/1",
+                                      location="Bengaluru", posted=today.isoformat()), b)
+    older_strong = to_candidate(Posting("lever", "x", "X", "2", "Computer Vision Engineer", "https://a/2",
+                                        location="Bengaluru", posted=date(today.year, today.month, 1).isoformat()
+                                        if today.day > 1 else today.isoformat(),
+                                        description="C++ and PyTorch"), b)
+    assert [c.job_id if hasattr(c, "job_id") else c.id for c in rank([fresh_weak, older_strong])][0].endswith(":2")
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+
+
+def test_no_fit_file_means_no_reordering(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "FIT_KEYWORDS_PATH", tmp_path / "missing.txt")
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+    assert filters.fit_score("Computer Vision Engineer", "") == (0, [])
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+
+
+def test_rank_alternates_fit_and_freshness(tmp_path, monkeypatch):
+    rules = tmp_path / "fit.txt"
+    rules.write_text("3 computer vision\n", encoding="utf-8")
+    monkeypatch.setattr(config, "FIT_KEYWORDS_PATH", rules)
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+    b = Board("lever", "x", "X")
+    today = date.today().toordinal()
+    def cand(i, title, days_old):
+        posted = date.fromordinal(today - days_old).isoformat()
+        return to_candidate(Posting("lever", "x", "X", str(i), title, f"https://a/{i}",
+                                    location="Bengaluru", posted=posted), b)
+    strong = [cand(i, "Computer Vision Engineer", 20 + i) for i in range(3)]
+    generic = [cand(10 + i, "AI Engineer", i) for i in range(3)]  # fresher, no keyword match
+    order = [c.title for c in rank(strong + generic)]
+    assert order[:4] == ["Computer Vision Engineer", "AI Engineer", "Computer Vision Engineer", "AI Engineer"]
+    assert len(order) == 6
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
