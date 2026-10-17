@@ -51,6 +51,21 @@ def test_candidates_record_skip_and_limit(tmp_path, monkeypatch):
     assert run.registry.entries["lever:acme"].recorded_total == "2"
 
 
+def test_us_cap_and_experience_default(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=1)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 10)
+    monkeypatch.setattr(config, "MAX_US_JOBS", 2)
+    india_id = next(iter(run.pool))
+    us_jobs = [{"company": f"US{i}", "role": "ML Engineer", "location": "Seattle, WA",
+                "url": f"https://us.com/{i}", "why": "fits"} for i in range(3)]
+    res = call(tools, "add_jobs", {"jobs": us_jobs + [{"candidate_id": india_id, "why": "fits"}]})
+    assert res["added"] == 3  # two US plus the India one; the third US job is refused
+    assert [r["reason"] for r in res["rejected"]] == ["United States cap (2) reached for this run"]
+    assert res["remaining_us_slots"] == 0
+    india = next(j for j in store.read_jobs() if j["market"] == "India")
+    assert india["experience"] == "2+ yrs"  # filled from the posting's own wording
+
+
 def test_register_board_rejects_unsupported(tmp_path, monkeypatch):
     _, tools = setup_run(tmp_path, monkeypatch)
     msg = call(tools, "register_board", {"url": "https://razorpay.darwinbox.in/ms/candidate/careers",

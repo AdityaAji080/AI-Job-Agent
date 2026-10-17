@@ -75,6 +75,10 @@ ADD_JOBS_SCHEMA = {
             "deadline_or_start": {"type": "string", "description": "Labelled, e.g. 'deadline 2026-11-30' "
                                                                    "or 'starts Jan 2027'. Empty if neither."},
             "compensation": {"type": "string", "description": "Salary range if stated, else empty"},
+            "experience": {"type": "string", "description": "Stated experience requirement in short form, "
+                                                            "e.g. '5–10 yrs', '3+ yrs preferred'. Empty if "
+                                                            "not stated. For pool candidates it is filled "
+                                                            "from the posting if you leave it empty."},
             "url": {"type": "string", "description": "Direct link to the posting; only URLs you opened "
                                                      "or that came from the pool"},
             "why": {"type": "string", "description": "One sentence on why this fits, naming any gap"},
@@ -98,7 +102,7 @@ SKIP_SCHEMA = {
 
 def build_tools(run: Run):
     @tool("get_candidates", "List undecided candidates from the harvested pool for one market, best "
-          "first. Markets: India, Canada, Singapore, United States, Remote (unspecified), Unknown.",
+          "first. Markets: India, Singapore, Canada, Remote (unspecified), Unknown, United States.",
           {"type": "object", "properties": {
               "market": {"type": "string"},
               "offset": {"type": "integer", "default": 0},
@@ -125,16 +129,19 @@ def build_tools(run: Run):
                             or "(The board API gave no description. Open the url with WebFetch.)"})
 
     @tool("add_jobs", "Record jobs that fit in the tracker. Duplicates are rejected automatically. "
-          "Refuses anything past this run's limit.", ADD_JOBS_SCHEMA)
+          f"Refuses anything past this run's limit, and United States jobs past {config.MAX_US_JOBS}.",
+          ADD_JOBS_SCHEMA)
     async def add_jobs(args):
         room = config.MAX_NEW_JOBS - run.recorded
+        us_room = config.MAX_US_JOBS - run.recorded_by_market["United States"]
         jobs, refused = [], []
         for job in args.get("jobs") or []:
             cid = job.pop("candidate_id", "") or ""
             c = run.pool.get(cid)
             if c:
                 defaults = {"company": c.company, "role": c.title, "location": c.location,
-                            "posted": c.posted, "compensation": c.compensation, "url": c.url}
+                            "posted": c.posted, "compensation": c.compensation, "url": c.url,
+                            "experience": filters.experience_range(c.experience_hints)}
                 for k, v in defaults.items():
                     if not job.get(k):
                         job[k] = v
@@ -148,6 +155,12 @@ def build_tools(run: Run):
             if len(jobs) >= room:
                 refused.append({"role": job.get("role"), "reason": "run limit reached"})
                 continue
+            if job["market"] == "United States":
+                if us_room <= 0:
+                    refused.append({"role": job.get("role"),
+                                    "reason": f"United States cap ({config.MAX_US_JOBS}) reached for this run"})
+                    continue
+                us_room -= 1
             job["_board"] = c.board_key if c else ""
             jobs.append(job)
             if c:
@@ -164,6 +177,8 @@ def build_tools(run: Run):
         result["rejected"] = result["rejected"] + refused
         result["recorded_this_run"] = run.recorded
         result["remaining_slots"] = max(0, config.MAX_NEW_JOBS - run.recorded)
+        result["remaining_us_slots"] = max(0, min(result["remaining_slots"],
+                                                  config.MAX_US_JOBS - run.recorded_by_market["United States"]))
         return text_result(result)
 
     @tool("skip_candidates", "Mark pool candidates as judged and not a fit, with the reason. "
@@ -234,7 +249,7 @@ def harvest_summary(run: Run) -> str:
     for r in failed:
         lines.append(f"- Board failed: {r.board.company or r.board.slug} ({r.board.ats}): {r.error}")
     if not run.board_results:
-        lines.append("- The registry is empty, so Step 2 (discovery) is the whole run.")
+        lines.append("- The registry is empty, so the pool is empty: each market is discovery only.")
     return "\n".join(lines)
 
 
@@ -302,7 +317,7 @@ async def main() -> int:
 
     registry.save()  # keep board health even if the model step fails
     system_prompt = SYSTEM_PROMPT.format(
-        today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS,
+        today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS, max_us=config.MAX_US_JOBS,
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))
 
@@ -323,8 +338,7 @@ async def main() -> int:
 
     final_text, result = "", None
     try:
-        start = ("Begin with Step 1 on India." if run.pool
-                 else "The pool is empty, so begin with Step 2 (discovery).")
+        start = "Begin with India."
         kickoff = KICKOFF.format(harvest_summary=harvest_summary(run), start=start)
         async for msg in query(prompt=kickoff, options=options):
             if isinstance(msg, AssistantMessage):

@@ -24,6 +24,9 @@ RUNS_CSV = DATA_DIR / "runs.csv"
 
 # --- Run limits -------------------------------------------------------------
 MAX_NEW_JOBS = int(os.environ.get("MAX_NEW_JOBS", "25"))
+# US listings are plentiful and easy to verify, so they would crowd out the
+# markets that matter more. Cap them per run.
+MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "5"))
 MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "5.00"))
 MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
 
@@ -72,15 +75,24 @@ TITLE_EXCLUDE = re.compile(
 )
 
 # --- Markets ------------------------------------------------------------------
-# Ordered by priority. The first market whose pattern matches a location wins.
+# Priority tiers: lower is worked first. India and Singapore share the top tier,
+# Canada is a close second, the US comes last (and is capped, above).
+MARKET_TIERS = {
+    "India": 1, "Singapore": 1,
+    "Canada": 2,
+    "Remote (unspecified)": 3, "Unknown": 3,
+    "United States": 4,
+}
+# Detection order: for a multi-city listing, the first market that matches wins,
+# so this follows the priority tiers.
 MARKETS: list[tuple[str, re.Pattern]] = [
     ("India", re.compile(
         r"\bindia\b|bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|noida|hyderabad|"
         r"pune|chennai|kochi|thiruvananthapuram|trivandrum|ahmedabad|kolkata", re.I)),
+    ("Singapore", re.compile(r"singapore", re.I)),
     ("Canada", re.compile(
         r"canada|toronto|vancouver|montr[eé]al|ottawa|waterloo|kitchener|calgary|edmonton|"
         r"halifax|winnipeg|qu[eé]bec|victoria, bc|, ?(on|bc|ab|qc|ns|mb)\b", re.I)),
-    ("Singapore", re.compile(r"singapore", re.I)),
     ("United States", re.compile(
         r"united states|\busa?\b|u\.s\.|americas|"
         r"san francisco|new york|seattle|boston|austin|los angeles|chicago|mountain view|"
@@ -115,4 +127,4 @@ OTHER_PLACES = re.compile(
     re.I,
 )
 REMOTE = re.compile(r"remote|anywhere|distributed|work from home|\bwfh\b", re.I)
-STALE_DAYS = 60
+STALE_DAYS = 90

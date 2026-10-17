@@ -10,7 +10,9 @@ from datetime import date
 
 from . import config
 
-MARKET_ORDER = [name for name, _ in config.MARKETS] + ["Remote (unspecified)", "Unknown"]
+# Display and work order: by tier, then as listed within a tier.
+MARKET_ORDER = sorted(config.MARKET_TIERS, key=lambda m: (config.MARKET_TIERS[m],
+                                                          list(config.MARKET_TIERS).index(m)))
 
 
 def market_of(location: str, remote: bool | None = None) -> str:
@@ -27,7 +29,8 @@ def market_of(location: str, remote: bool | None = None) -> str:
 
 
 def market_rank(market: str) -> int:
-    return MARKET_ORDER.index(market) if market in MARKET_ORDER else len(MARKET_ORDER)
+    """Priority tier; markets in the same tier (India, Singapore) rank equally."""
+    return config.MARKET_TIERS.get(market, max(config.MARKET_TIERS.values()) + 1)
 
 
 def title_ok(title: str) -> bool:
@@ -36,6 +39,16 @@ def title_ok(title: str) -> bool:
 
 _YEARS = re.compile(
     r"(\d{1,2})\s*(?:\+|plus)?\s*(?:(?:-|–|to)\s*(\d{1,2})\s*\+?)?\s*(?:years?|yrs?)", re.I)
+def experience_range(hints: list[str]) -> str:
+    """Short form of the first stated requirement, e.g. '5–10 yrs' or '3+ yrs'. For the tracker column."""
+    for hint in hints:
+        m = _YEARS.search(hint)
+        if m:
+            lo, hi = m.group(1), m.group(2)
+            return f"{lo}–{hi} yrs" if hi else f"{lo}+ yrs"
+    return ""
+
+
 _PHD = re.compile(r"\bph\.?\s?d\b|doctoral|doctorate", re.I)
 
 

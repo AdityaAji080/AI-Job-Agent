@@ -92,7 +92,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Secret `ANTHROPIC_API_KEY`: your key from console.anthropic.com
    - Secret `DATA_REPO_TOKEN`: the token from step 2
    - Variable `DATA_REPO`: `your-username/job-agent-data`
-   - Optional variables `MAX_BUDGET_USD` (default 5.00) and `MAX_NEW_JOBS` (default 25)
+   - Optional variables `MAX_BUDGET_USD` (default 5.00), `MAX_NEW_JOBS` (default 25) and
+     `MAX_US_JOBS` (default 5)
 
 4. **Check the boards first.** Actions → Job search run → Run workflow → *harvest-only*.
    This reads every board and prints the pool without calling the model.

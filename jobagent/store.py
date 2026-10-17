@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlsplit
 from . import config
 
 COLUMNS = ["date_added", "company", "role", "location", "market", "posted", "deadline_or_start",
-           "compensation", "url", "why", "status", "applied"]
+           "compensation", "experience", "url", "why", "status", "applied"]
 SEEN_COLUMNS = ["key", "decision", "reason", "company", "role", "date"]
 
 # Query parameters that identify a job (everything else, like utm_*, is noise).
@@ -45,10 +45,33 @@ def _read(path: Path) -> list[dict]:
 def _append(path: Path, columns: list[str], rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
+    if not new:  # follow the file's own header, so columns you added stay aligned
+        with open(path, newline="", encoding="utf-8") as f:
+            columns = next(csv.reader(f), None) or columns
     with open(path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         if new:
             writer.writeheader()
+        writer.writerows(rows)
+
+
+def ensure_schema() -> None:
+    """Rewrite jobs.csv with the current columns if it was written by an older version.
+
+    Existing values (including your status and applied edits) are kept; new columns start empty.
+    """
+    path = config.JOBS_CSV
+    if not path.exists():
+        return
+    with open(path, newline="", encoding="utf-8") as f:
+        header = next(csv.reader(f), [])
+    if header == COLUMNS:
+        return
+    rows = _read(path)
+    extra = [c for c in header if c and c not in COLUMNS]  # keep any columns you added yourself
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS + extra, extrasaction="ignore")
+        writer.writeheader()
         writer.writerows(rows)
 
 
@@ -67,6 +90,7 @@ def known_keys() -> set[str]:
 
 def append_jobs(jobs: list[dict]) -> dict:
     """Add jobs, rejecting duplicates by URL and by company+role+location."""
+    ensure_schema()
     existing = read_jobs()
     keys = {job_key(j.get("url", "")) for j in existing}
     roles = {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("location") or "").lower()

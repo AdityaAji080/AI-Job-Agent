@@ -13,9 +13,27 @@ from jobagent.harvest import prefilter, rank, to_candidate
     ("Sunnyvale, CA", "United States"), ("Remote - US (open to Canada)", "Canada"),
     ("London, UK", "Other"), ("Berlin / Remote", "Other"), ("London; Bengaluru", "India"),
     ("Remote", "Remote (unspecified)"), ("", "Unknown"), ("HQ", "Unknown"),
+    ("Toronto / Singapore", "Singapore"), ("Singapore / Bengaluru", "India"),
 ])
 def test_market_of(loc, market):
     assert filters.market_of(loc) == market
+
+
+def test_market_priority():
+    r = filters.market_rank
+    assert r("India") == r("Singapore") < r("Canada") < r("Unknown") < r("United States")
+    assert filters.MARKET_ORDER[:3] == ["India", "Singapore", "Canada"]
+    assert filters.MARKET_ORDER[-1] == "United States"
+
+
+@pytest.mark.parametrize("hint,expected", [
+    ("You have 5-10 years of professional experience", "5–10 yrs"),
+    ("8+ years of industry experience required", "8+ yrs"),
+    ("at least 3 years working with PyTorch", "3+ yrs"),
+])
+def test_experience_range(hint, expected):
+    assert filters.experience_range([hint]) == expected
+    assert filters.experience_range([]) == ""
 
 
 @pytest.mark.parametrize("title,ok", [
@@ -84,3 +102,21 @@ def test_append_dedupes_and_marks_seen(tmp_path, monkeypatch):
     assert store.job_key("https://a.com/1") in store.known_keys()
     store.mark_seen([{"url": "https://b.com/2", "reason": "7+ years"}])
     assert store.job_key("https://b.com/2") in store.known_keys()
+
+
+def test_old_tracker_is_upgraded_in_place(tmp_path, monkeypatch):
+    """A jobs.csv from before the experience column keeps its rows, edits and extra columns."""
+    path = tmp_path / "jobs.csv"
+    monkeypatch.setattr(config, "JOBS_CSV", path)
+    monkeypatch.setattr(config, "SEEN_CSV", tmp_path / "seen.csv")
+    old = ["date_added", "company", "role", "location", "market", "posted", "deadline_or_start",
+           "compensation", "url", "why", "status", "applied", "my_notes"]
+    path.write_text(",".join(old) + "\n2026-09-20,Acme,ML Engineer,Pune,India,,,,https://a.com/1,fits,"
+                    "interviewing,Yes,called recruiter\n", encoding="utf-8")
+    store.append_jobs([{"company": "Beta", "role": "AI Engineer", "location": "Singapore",
+                        "url": "https://b.com/1", "why": "x", "experience": "5–10 yrs"}])
+    rows = store.read_jobs()
+    assert list(rows[0]) == store.COLUMNS + ["my_notes"]
+    assert (rows[0]["status"], rows[0]["applied"], rows[0]["my_notes"], rows[0]["experience"]) == (
+        "interviewing", "Yes", "called recruiter", "")
+    assert (rows[1]["company"], rows[1]["experience"], rows[1]["my_notes"]) == ("Beta", "5–10 yrs", "")
