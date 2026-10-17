@@ -59,6 +59,7 @@ jobs:
           MAX_BUDGET_USD: ${{ vars.MAX_BUDGET_USD || '5.00' }}
           MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '25' }}
           MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '5' }}
+          MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '3' }}
         run: python -m jobagent.agent
 
       - name: Save results to the data repository

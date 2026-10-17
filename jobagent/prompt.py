@@ -67,28 +67,32 @@ For each candidate, decide: record it, or skip it for a reason on the skip list.
 
 **B. Discover new boards in this market.** The registry only knows companies it has
 already seen, and the companies named in the criteria are examples, not a boundary.
-Grow the registry.
+Grow the registry. The goal of B is companies, not individual listings: one registered
+board yields every role that company posts, today and on every later run.
 
-Use WebSearch restricted to job-board domains, crossed with the market's cities and a role
-keyword:
+1. **Name companies.** Build a list of employers in this market that plausibly hire for
+   the role shape: AI startups and labs, product companies with engineering teams there,
+   robotics, automotive, semiconductor and embedded firms, global companies with an
+   engineering centre in the market's cities. Draw on what you know, on the criteria's
+   domains, and on WebSearch for lists and news ("AI startups Bengaluru Series B",
+   "Singapore robotics companies hiring", "GCC engineering centres Hyderabad"). Aggregator
+   pages are useful here: they name employers even when their links are no good.
+2. **Find their boards with `find_boards`.** Pass up to 15 names a call. It tries each
+   name on Greenhouse, Lever, Ashby, SmartRecruiters, Workable and Recruitee directly and
+   returns the boards that exist, with sample titles and locations. Check that the sample
+   looks like that company (a hit on a generic slug can belong to someone else), then pass
+   its `board_url` to `register_board`.
+3. **`register_board`** adds the whole board to the registry and returns its new
+   candidates straight away. Judge them exactly as in A while slots remain.
 
-    site:jobs.ashbyhq.com Bengaluru "machine learning"
-    site:job-boards.greenhouse.io Singapore "applied AI"
-    site:jobs.lever.co Bangalore "computer vision"
-    site:myworkdayjobs.com Singapore "machine learning engineer"
-    site:apply.workable.com India "AI engineer"
-    site:jobs.smartrecruiters.com Toronto "machine learning"
+`site:` searches against job-board domains (`site:jobs.ashbyhq.com Bengaluru "machine
+learning"`) and `site:myworkdayjobs.com` for Workday, which `find_boards` cannot probe,
+are worth a few tries per market, but they often return only aggregators. Whenever any
+page you read links to a posting or board on a supported system, pass that URL to
+`register_board`.
 
-Supported systems: Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee and
-Workday. Whenever a result, or any page you read, links to a posting or board on one of
-those, pass that URL to `register_board`. It adds the company's entire board to the
-registry and returns its new candidates straight away; judge them exactly as in A.
-One search hit unlocks every role that company has, today and on every later run.
-
-Vary the role keyword using the domains in the criteria (LLM tooling, evaluation,
-synthetic media detection, computer vision, robotics, embedded and real-time systems,
-forward-deployed and solutions roles). A query that returns nothing useful twice is a
-query to abandon, not to rephrase a third time.
+Aim for at least two `find_boards` calls per top market (India, Singapore) and one for
+Canada. A market where no name produced a board is worth reporting in the summary.
 
 **C. Open search for employers on other systems.** Some employers use systems the harvester
 can't read, such as Darwinbox, Keka, Zoho Recruit, iCIMS, Taleo, SuccessFactors or their
@@ -112,10 +116,16 @@ These listings did not come through the harvester, so verify them:
 
 ## Limits
 
-Record at most {max_new} jobs this run, of which at most {max_us} may be in the United
-States. `add_jobs` refuses anything beyond either limit. When the overall limit is reached,
-stop. When only the US limit is reached, skip nothing further: leave remaining US
-candidates undecided so they stay in the pool for a later run.
+Record at most {max_new} jobs this run, at most {max_us} in the United States, and at most
+{max_company} from any one company. `add_jobs` refuses anything beyond these. When a company or
+the US reaches its cap, don't skip its remaining candidates: leave them undecided so they
+stay in the pool for a later run, and move on.
+
+When the overall limit is reached, stop judging, but don't stop the run. Discovery does
+not use slots. Finish step B for India, Singapore and Canada in that order, even if their
+pools were never reached: register every good board you find and leave its candidates
+undecided for the next run. Skip step C once the limit is reached; it only produces
+individual listings.
 
 ## Writing the entry
 

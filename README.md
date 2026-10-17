@@ -30,7 +30,7 @@ flowchart LR
     P --> A[Claude agent]
     A -->|record| J[(jobs.csv<br/>tracker)]
     A -->|skip, with reason| S[(seen.csv)]
-    A -->|site: searches find<br/>new companies| D[register_board]
+    A -->|names companies;<br/>find_boards probes APIs| D[register_board]
     D --> R
     D -->|harvest immediately| P
     S -.->|never judged twice| F
@@ -48,10 +48,14 @@ flowchart LR
   sentences that state experience or PhD requirements, and opens the full posting only
   when the summary doesn't settle it. Every decision is written down, so nothing is judged
   twice.
-- **The registry learns.** The model's remaining budget goes on discovery: searches like
-  `site:jobs.ashbyhq.com Bengaluru "machine learning"`. Any result on a supported board
-  registers that company's whole board, which is harvested on the spot and on every later
-  run. One search hit is worth every role that company ever posts.
+- **The registry learns.** The model's remaining budget goes on discovery. It names
+  employers in each market, and `find_boards` checks each name against six job-board
+  systems' APIs by trying likely slugs (web `site:` searches mostly return aggregators, so
+  they're a fallback). A confirmed board is registered and harvested on the spot and on every
+  later run, so one discovered company is worth every role it ever posts. Discovery doesn't
+  use up the run's job slots, so it continues after they're full.
+- **No single source dominates.** Markets are worked in priority order with a cap on US
+  jobs, and no company can take more than three slots in a run; the rest wait in the pool.
 - **Roles on unsupported systems still count.** For employers on Darwinbox, Keka, iCIMS
   and the like, the agent falls back to search and fetch, with explicit verification
   rules (employer page over aggregator, never construct a URL).
@@ -64,6 +68,7 @@ jobagent/
   harvest.py      reads all boards concurrently, prefilters, ranks; runnable on its own
   filters.py      market classification, title filter, experience/PhD/staleness hints
   registry.py     boards.csv: every board found, with health and yield stats
+  discover.py     finds a company's board from its name by probing each system's API
   store.py        jobs.csv and seen.csv, with URL normalisation for deduplication
   agent.py        the Claude Agent SDK run and the six tools it gets
   prompt.py       the run instructions (profile-specific text comes from your files)
@@ -92,8 +97,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Secret `ANTHROPIC_API_KEY`: your key from console.anthropic.com
    - Secret `DATA_REPO_TOKEN`: the token from step 2
    - Variable `DATA_REPO`: `your-username/job-agent-data`
-   - Optional variables `MAX_BUDGET_USD` (default 5.00), `MAX_NEW_JOBS` (default 25) and
-     `MAX_US_JOBS` (default 5)
+   - Optional variables `MAX_BUDGET_USD` (default 5.00), `MAX_NEW_JOBS` (default 25),
+     `MAX_US_JOBS` (default 5) and `MAX_PER_COMPANY` (default 3)
 
 4. **Check the boards first.** Actions → Job search run → Run workflow → *harvest-only*.
    This reads every board and prints the pool without calling the model.
@@ -110,6 +115,7 @@ git clone https://github.com/your-username/job-agent-data private
 python -m jobagent.harvest                         # check every registered board
 python -m jobagent.harvest https://jobs.lever.co/x # check one board
 python -m jobagent.seed URL --company "Name"       # add a board by hand
+python -m jobagent.discover "Sarvam AI" "Qure.ai"  # look for companies' boards
 ANTHROPIC_API_KEY=... python -m jobagent.agent     # full run
 python -m pytest -q
 ```

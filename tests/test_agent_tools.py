@@ -66,6 +66,21 @@ def test_us_cap_and_experience_default(tmp_path, monkeypatch):
     assert india["experience"] == "2+ yrs"  # filled from the posting's own wording
 
 
+def test_company_cap_leaves_the_rest_undecided(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=5)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 10)
+    monkeypatch.setattr(config, "MAX_PER_COMPANY", 3)
+    ids = [c["id"] for c in call(tools, "get_candidates", {"market": "India", "limit": 10})["candidates"]]
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "fits"} for i in ids]})
+    assert res["added"] == 3
+    assert sum("already has 3 this run" in r["reason"] for r in res["rejected"]) == 2
+    assert call(tools, "get_candidates", {"market": "India"})["total_open"] == 2
+    # a later call in the same run still respects the cap
+    res = call(tools, "add_jobs", {"jobs": [{"company": "ACME", "role": "AI Engineer", "location": "Pune",
+                                             "url": "https://acme.com/9", "why": "fits"}]})
+    assert res["added"] == 0
+
+
 def test_register_board_rejects_unsupported(tmp_path, monkeypatch):
     _, tools = setup_run(tmp_path, monkeypatch)
     msg = call(tools, "register_board", {"url": "https://razorpay.darwinbox.in/ms/candidate/careers",

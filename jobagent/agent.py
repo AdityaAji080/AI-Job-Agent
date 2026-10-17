@@ -20,6 +20,7 @@ from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessag
 from . import config, filters, store
 from .ats import detect_board, unsupported_system
 from .ats.base import make_client
+from .discover import probe
 from .harvest import Candidate, BoardResult, harvest, harvest_board, rank
 from .prompt import KICKOFF, SYSTEM_PROMPT
 from .registry import Registry
@@ -35,8 +36,11 @@ class Run:
         self.recorded = 0
         self.skipped = Counter()
         self.recorded_by_market = Counter()
+        self.recorded_by_company = Counter()
         self.registered: list[str] = []
         self.board_results: list[BoardResult] = []
+        self.probed = 0
+        self.harvest_text = ""  # snapshot of the harvest, taken before the model starts
 
     def absorb(self, results: list[BoardResult]) -> None:
         for r in results:
@@ -129,11 +133,12 @@ def build_tools(run: Run):
                             or "(The board API gave no description. Open the url with WebFetch.)"})
 
     @tool("add_jobs", "Record jobs that fit in the tracker. Duplicates are rejected automatically. "
-          f"Refuses anything past this run's limit, and United States jobs past {config.MAX_US_JOBS}.",
-          ADD_JOBS_SCHEMA)
+          f"Refuses anything past this run's limit, United States jobs past {config.MAX_US_JOBS}, "
+          f"and more than {config.MAX_PER_COMPANY} from one company.", ADD_JOBS_SCHEMA)
     async def add_jobs(args):
         room = config.MAX_NEW_JOBS - run.recorded
         us_room = config.MAX_US_JOBS - run.recorded_by_market["United States"]
+        company_used = Counter(run.recorded_by_company)
         jobs, refused = [], []
         for job in args.get("jobs") or []:
             cid = job.pop("candidate_id", "") or ""
@@ -161,6 +166,14 @@ def build_tools(run: Run):
                                     "reason": f"United States cap ({config.MAX_US_JOBS}) reached for this run"})
                     continue
                 us_room -= 1
+            company = store.role_key(job["company"], "").rstrip("|")
+            if company_used[company] >= config.MAX_PER_COMPANY:
+                refused.append({"role": job.get("role"),
+                                "reason": f"{job['company']} already has {config.MAX_PER_COMPANY} this run; "
+                                          "leave its other roles undecided for a later run"})
+                continue
+            company_used[company] += 1
+            job["_company"] = company
             job["_board"] = c.board_key if c else ""
             jobs.append(job)
             if c:
@@ -171,6 +184,7 @@ def build_tools(run: Run):
         for job in jobs:
             if store.job_key(job["url"]) in added_urls:
                 run.recorded_by_market[job["market"]] += 1
+                run.recorded_by_company[job["_company"]] += 1
                 if job["_board"]:
                     run.registry.record_recorded(job["_board"])
         run.recorded += result["added"]
@@ -228,6 +242,18 @@ def build_tools(run: Run):
                             "candidates": [c.summary() for c in found[:20]],
                             "note": "More via get_candidates." if len(found) > 20 else ""})
 
+    @tool("find_boards", "Given company names, check Greenhouse, Lever, Ashby, SmartRecruiters, Workable "
+          "and Recruitee for a job board with open postings, by trying likely slugs. Returns each hit's "
+          "board_url, posting count and sample titles and locations. Nothing is registered: check the "
+          "sample looks like that company, then pass board_url to register_board. Up to 15 names a call.",
+          {"type": "object", "properties": {"companies": {"type": "array", "items": {"type": "string"}}},
+           "required": ["companies"]})
+    async def find_boards(args):
+        names = [n for n in (args.get("companies") or []) if n.strip()][:15]
+        result = await probe(names, known_keys=set(run.registry.entries))
+        run.probed += len(names)
+        return text_result(result)
+
     @tool("is_known", "Check whether posting URLs are already tracked or already judged.",
           {"type": "object", "properties": {"urls": {"type": "array", "items": {"type": "string"}}},
            "required": ["urls"]})
@@ -235,7 +261,7 @@ def build_tools(run: Run):
         known = store.known_keys()
         return text_result({u: (store.job_key(u) in known) for u in args.get("urls") or []})
 
-    return [get_candidates, get_posting, add_jobs, skip_candidates, register_board, is_known]
+    return [get_candidates, get_posting, add_jobs, skip_candidates, register_board, find_boards, is_known]
 
 
 def harvest_summary(run: Run) -> str:
@@ -263,6 +289,7 @@ def log_run(run: Run, result: ResultMessage | None, final_text: str) -> None:
         "recorded": run.recorded,
         "skipped": sum(run.skipped.values()),
         "registered": len(run.registered),
+        "probed": run.probed,
         "cost_usd": f"{(result.total_cost_usd or 0):.2f}" if result else "",
         "turns": result.num_turns if result else "",
         "outcome": result.subtype if result else "no result",
@@ -285,7 +312,11 @@ def log_run(run: Run, result: ResultMessage | None, final_text: str) -> None:
                     f"Cost ${row['cost_usd'] or '?'} over {row['turns']} turns ({row['outcome']}).\n\n")
             if run.recorded_by_market:
                 f.write("By market: " + ", ".join(f"{m} {n}" for m, n in run.recorded_by_market.items()) + "\n\n")
-            f.write("### Harvest\n\n" + harvest_summary(run) + "\n\n")
+            f.write("### Harvest (before the agent started)\n\n" + run.harvest_text + "\n\n")
+            left = run.market_counts()
+            f.write("Left undecided for later runs: " + (", ".join(
+                f"{m} {left[m]}" for m in filters.MARKET_ORDER if left.get(m)) or "none") + "\n\n")
+            f.write(f"Companies probed for boards: {run.probed}.\n\n")
             if final_text:
                 f.write("### Agent summary\n\n" + final_text + "\n")
 
@@ -303,7 +334,8 @@ async def main() -> int:
     registry = Registry.load()
     run = Run(registry)
     run.absorb(await harvest([e.board for e in registry.active()], store.known_keys()))
-    print(harvest_summary(run), flush=True)
+    run.harvest_text = harvest_summary(run)
+    print(run.harvest_text, flush=True)
 
     if args.dry_run:
         no_desc = sum(1 for c in run.pool.values() if not c.description)
@@ -318,12 +350,14 @@ async def main() -> int:
     registry.save()  # keep board health even if the model step fails
     system_prompt = SYSTEM_PROMPT.format(
         today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS, max_us=config.MAX_US_JOBS,
+        max_company=config.MAX_PER_COMPANY,
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))
 
     server = create_sdk_mcp_server(name="jobs", version="2.0.0", tools=build_tools(run))
     tool_names = [f"mcp__jobs__{n}" for n in ("get_candidates", "get_posting", "add_jobs",
-                                              "skip_candidates", "register_board", "is_known")]
+                                              "skip_candidates", "register_board", "find_boards",
+                                              "is_known")]
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
         mcp_servers={"jobs": server},
@@ -339,7 +373,7 @@ async def main() -> int:
     final_text, result = "", None
     try:
         start = "Begin with India."
-        kickoff = KICKOFF.format(harvest_summary=harvest_summary(run), start=start)
+        kickoff = KICKOFF.format(harvest_summary=run.harvest_text, start=start)
         async for msg in query(prompt=kickoff, options=options):
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:

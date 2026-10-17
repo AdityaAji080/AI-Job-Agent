@@ -27,6 +27,9 @@ MAX_NEW_JOBS = int(os.environ.get("MAX_NEW_JOBS", "25"))
 # US listings are plentiful and easy to verify, so they would crowd out the
 # markets that matter more. Cap them per run.
 MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "5"))
+# One large board (a university, a big employer) shouldn't fill a run on its own.
+# Roles past the cap stay in the pool for later runs.
+MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "3"))
 MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "5.00"))
 MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
 
