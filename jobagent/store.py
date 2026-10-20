@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlsplit
 from . import config
 
 COLUMNS = ["date_added", "company", "role", "location", "market", "posted", "deadline_or_start",
-           "compensation", "experience", "url", "why", "status", "applied"]
+           "compensation", "experience", "url", "why", "status", "applied", "cv"]
 SEEN_COLUMNS = ["key", "decision", "reason", "company", "role", "date"]
 
 # Query parameters that identify a job (everything else, like utm_*, is noise).
@@ -84,6 +84,34 @@ def ensure_schema() -> None:
         writer = csv.DictWriter(f, fieldnames=COLUMNS + extra, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def update_job(url: str, **fields) -> bool:
+    """Set columns on the tracker row for a URL. Everything else, your edits included, is kept.
+
+    Written to a temporary file and swapped in, so an interrupted write can't truncate
+    the tracker. Returns False when no row has that URL.
+    """
+    ensure_schema()
+    path = config.JOBS_CSV
+    rows = _read(path)
+    key = job_key(url)
+    hit = False
+    for row in rows:
+        if job_key(row.get("url", "")) == key:
+            row.update(fields)
+            hit = True
+    if not hit:
+        return False
+    with open(path, newline="", encoding="utf-8") as f:
+        header = next(csv.reader(f), []) or COLUMNS
+    tmp = path.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=header, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp.replace(path)
+    return True
 
 
 def read_jobs() -> list[dict]:

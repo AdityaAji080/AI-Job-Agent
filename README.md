@@ -79,7 +79,8 @@ jobagent/
   agent.py        the Claude Agent SDK run and the six tools it gets
   prompt.py       the run instructions (profile-specific text comes from your files)
   seed.py         add boards by hand, or from an existing tracker
-  cv/             tailored CVs: content rules, LaTeX template, PDF checks
+  postings.py     saved posting text, and re-reading a posting from its job board
+  cv/             tailored CVs: model requests, content rules, LaTeX template, PDF checks
 tests/            adapter parsing, URL detection, filters, dedup, and the agent's tools
 example/profile/  sample resume and criteria
 ```
@@ -131,6 +132,28 @@ python -m pytest -q
 
 ## Tailored CVs
 
+```bash
+python -m jobagent.cv tailor URL [URL ...]           # needs ANTHROPIC_API_KEY
+python -m jobagent.cv tailor URL --posting-file F     # when the job board can't be read
+```
+
+For each tracked posting this runs five steps, each a single API request:
+
+1. **Research** what the company does (Sonnet with up to 3 web searches). Notes are cached
+   per company in `data/companies/` for 45 days, so the fourth Cohere role costs nothing here.
+2. **Draft** a tailored selection of your CV source (Opus).
+3. **Critique** it as the hiring manager would (Sonnet): claims the source doesn't support,
+   requirements the source covers but the draft leaves out, emphasis.
+4. **Revise** with that review (Opus), skipped when the review says it's ready.
+5. **Check and render**: the content checks below, with up to two repair requests if they
+   fail, then the PDF build and its checks.
+
+The posting text comes from `data/postings/`, which `add_jobs` fills as jobs are recorded;
+older tracker rows are re-read from their job board (`python -m jobagent.postings URL`).
+Output goes to `data/applications/<company>_<role>_<id>/`: `cv.pdf`, `tailored.json`, and
+`review.json` with every step, the review, any gaps the posting asks for that your CV can't
+support, and the token usage. The tracker's `cv` column points to the PDF.
+
 A tailored CV is a **selection and rewording** of `profile/cv_source.yaml`, never free
 text. A model returns which bullets to use, in what order and how to word them; the
 fixed LaTeX template in `jobagent/cv/` supplies the layout, and titles, employers,
@@ -164,6 +187,9 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 | `seen.csv` | Every posting judged, with the decision and the reason. Delete a row to have it judged again. |
 | `boards.csv` | The registry. Set `enabled` to `no` to stop reading a board. A board that fails three runs in a row disables itself. |
 | `runs.csv` | One line per run: boards read, pool size, recorded, skipped, cost. |
+| `postings/` | The text of each recorded posting, saved when it was recorded. |
+| `applications/` | Tailored CVs, one folder per posting. |
+| `companies/` | Company research notes used by the CV reviewer, reused for 45 days. |
 
 ## Adding a job-board system
 

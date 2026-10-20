@@ -1,14 +1,17 @@
-"""Render and check a CV without any model calls.
+"""Tailored CVs from the command line.
 
-    python -m jobagent.cv baseline --out OUT_DIR          # every source bullet, as written
+    python -m jobagent.cv tailor URL [URL ...]          # research, draft, review, render
+    python -m jobagent.cv tailor URL --posting-file F    # when the job board can't be read
+    python -m jobagent.cv baseline --out OUT_DIR         # your full CV, no model calls
     python -m jobagent.cv check TAILORED.json --out OUT_DIR
 
-Exit 0 when there are no errors (warnings are printed), 1 otherwise.
+`tailor` needs ANTHROPIC_API_KEY. Exit status is 0 only if everything succeeded.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,23 +20,17 @@ from .content import baseline, check_content, load_source
 from .render import build
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["baseline", "check"])
-    ap.add_argument("tailored", nargs="?", help="tailored selection (JSON), for 'check'")
-    ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--source", type=Path, default=config.CV_SOURCE_PATH)
-    ap.add_argument("--max-pages", type=int, default=None, help="overrides layout.max_pages in the source")
-    args = ap.parse_args()
+def _print_problems(problems) -> int:
+    for p in problems:
+        print("   ", p)
+    return sum(p.level == "error" for p in problems)
 
-    source = load_source(args.source)
-    if args.what == "baseline":
+
+def _render(args, source) -> int:
+    if args.cmd == "baseline":
         cv = baseline(source)
-    elif not args.tailored:
-        ap.error("check needs a tailored JSON file")
     else:
         cv = json.loads(Path(args.tailored).read_text(encoding="utf-8"))
-
     problems = check_content(source, cv)
     if any(p.level == "error" for p in problems):
         print("Content check failed; not rendering.")
@@ -42,11 +39,71 @@ def main() -> int:
         problems += more
         if pdf:
             print(f"Rendered {pdf}")
-    for p in problems:
-        print(" ", p)
-    errors = sum(p.level == "error" for p in problems)
+    errors = _print_problems(problems)
     print("PASS" if not errors else f"FAIL ({errors} error{'s' * (errors != 1)})")
     return 1 if errors else 0
+
+
+def _tailor(args, source) -> int:
+    import anthropic
+
+    from .tailor import tailor_url
+
+    if args.posting_file and len(args.urls) > 1:
+        print("--posting-file works with one URL at a time.", file=sys.stderr)
+        return 2
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Set ANTHROPIC_API_KEY first.", file=sys.stderr)
+        return 2
+    client = anthropic.Anthropic()
+    failed, spent = 0, 0.0
+    for url in args.urls:
+        print(f"\n{url}")
+        try:
+            result = tailor_url(client, source, url, posting_file=args.posting_file,
+                                company=args.company, role=args.role)
+        except anthropic.APIError as exc:
+            print(f"  API error: {exc}")
+            failed += 1
+            continue
+        spent += result.cost
+        _print_problems(result.problems)
+        if result.ok:
+            print(f"  OK  {result.pdf}  (~${result.cost:.2f})")
+        else:
+            failed += 1
+            details = result.out_dir / "review.json"
+            where = f"; details in {details}" if details.exists() else ""
+            print(f"  FAILED: {result.error}  (~${result.cost:.2f}{where})")
+    print(f"\n{len(args.urls) - failed} of {len(args.urls)} tailored, ~${spent:.2f} at standard prices.")
+    return 1 if failed else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--source", type=Path, default=config.CV_SOURCE_PATH)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    t = sub.add_parser("tailor", help="tailor the CV for one or more tracked postings")
+    t.add_argument("urls", nargs="+")
+    t.add_argument("--posting-file", type=Path, help="posting text, when its board can't be read")
+    t.add_argument("--company", default="", help="when the URL isn't in the tracker")
+    t.add_argument("--role", default="", help="when the URL isn't in the tracker")
+
+    for name in ("baseline", "check"):
+        p = sub.add_parser(name, help="render without model calls")
+        if name == "check":
+            p.add_argument("tailored", help="tailored selection (JSON)")
+        p.add_argument("--out", required=True, type=Path)
+        p.add_argument("--max-pages", type=int, default=None,
+                       help="overrides layout.max_pages in the source")
+
+    args = ap.parse_args()
+    if not args.source.exists():
+        print(f"Missing {args.source}. Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
+        return 2
+    source = load_source(args.source)
+    return _tailor(args, source) if args.cmd == "tailor" else _render(args, source)
 
 
 if __name__ == "__main__":
