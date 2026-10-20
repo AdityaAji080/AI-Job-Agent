@@ -83,7 +83,9 @@ def compile_pdf(tex: str, out_pdf: Path) -> tuple[bool, str]:
         (Path(tmp) / "cv.tex").write_text(tex, encoding="utf-8")
         for _ in range(2):
             run = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "cv.tex"],
-                                 cwd=tmp, capture_output=True, text=True, timeout=120)
+                                 cwd=tmp, capture_output=True, text=True, timeout=120,
+                                 # LaTeX logs aren't in Windows' default code page.
+                                 encoding="utf-8", errors="replace")
             if run.returncode != 0:
                 errors = [l for l in run.stdout.splitlines() if l.startswith("!")]
                 return False, "; ".join(errors[:3]) or run.stdout[-500:]
