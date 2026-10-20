@@ -17,7 +17,7 @@ from datetime import date
 from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock,
                               create_sdk_mcp_server, query, tool)
 
-from . import config, filters, store
+from . import config, filters, postings, store
 from .ats import detect_board, unsupported_system
 from .ats.base import make_client
 from .discover import probe
@@ -212,6 +212,9 @@ def build_tools(run: Run):
             jobs.append(job)
             if c:
                 run.decided.add(cid)  # only once accepted; refused ones stay for next run
+                # Keep the text the decision was made on; tailoring reads it later.
+                postings.save(url=job["url"], company=job["company"], role=job["role"],
+                              text=c.description, source=c.board_key)
         result = store.append_jobs(jobs)
         added_urls = {store.job_key(j["url"]) for j in store.read_jobs()[-result["added"]:]} \
             if result["added"] else set()
