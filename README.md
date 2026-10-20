@@ -79,6 +79,7 @@ jobagent/
   agent.py        the Claude Agent SDK run and the six tools it gets
   prompt.py       the run instructions (profile-specific text comes from your files)
   seed.py         add boards by hand, or from an existing tracker
+  cv/             tailored CVs: content rules, LaTeX template, PDF checks
 tests/            adapter parsing, URL detection, filters, dedup, and the agent's tools
 example/profile/  sample resume and criteria
 ```
@@ -127,6 +128,33 @@ python -m jobagent.discover "Sarvam AI" "Qure.ai"  # look for companies' boards
 ANTHROPIC_API_KEY=... python -m jobagent.agent     # full run
 python -m pytest -q
 ```
+
+## Tailored CVs
+
+A tailored CV is a **selection and rewording** of `profile/cv_source.yaml`, never free
+text. A model returns which bullets to use, in what order and how to word them; the
+fixed LaTeX template in `jobagent/cv/` supplies the layout, and titles, employers,
+dates and contact details are always copied from the source file. That keeps every CV
+in the same format and makes the checks deterministic:
+
+- **Content, before rendering:** every bullet names the source bullet it came from and
+  may only use numbers from that bullet (or its entry's header); skills and coursework
+  must exist in the source; every role must appear; summary and bullets have word limits.
+- **The PDF, after rendering:** it compiles; it fits `layout.max_pages`; the last page
+  isn't a near-empty spill-over; name, email, phone and every bullet are readable in the
+  text layer, which is what applicant-tracking systems parse.
+- **Fitting:** a CV over its page limit loses its least important bullet (the model lists
+  them most-relevant first) until it fits, and every removal is reported.
+
+All model text is LaTeX-escaped, so nothing in a posting or a model reply can act as a
+LaTeX command.
+
+```bash
+python -m jobagent.cv baseline --out out/          # your full CV, every bullet
+python -m jobagent.cv check tailored.json --out out/
+```
+
+Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 
 ## The data files
 

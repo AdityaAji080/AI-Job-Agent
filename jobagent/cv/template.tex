@@ -1,0 +1,78 @@
+%% Rendered by jobagent.cv. Edit the layout here; content comes from the source file
+%% and the tailored selection. Every interpolated value is LaTeX-escaped.
+%% Jinja delimiters are triple parentheses for values and paren-star for statements,
+%% so they never clash with LaTeX braces. See render.py.
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{charter}
+\usepackage[margin=1.6cm,top=1.4cm,bottom=1.4cm]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage[hidelinks,pdfusetitle]{hyperref}
+% Map every glyph to Unicode so applicant-tracking systems can read the text layer.
+\input{glyphtounicode}
+\pdfgentounicode=1
+
+\hypersetup{pdftitle={((( name ))) CV}, pdfauthor={((( name )))}}
+\definecolor{rule}{gray}{0.55}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\linespread{1.04}
+
+\titleformat{\section}{\large\bfseries}{}{0pt}{}[\vspace{1pt}{\color{rule}\titlerule}]
+\titlespacing*{\section}{0pt}{9pt}{5pt}
+\setlist[itemize]{leftmargin=1.1em, itemsep=1.5pt, parsep=0pt, topsep=2pt, label=\textbullet}
+
+\newcommand{\entry}[4]{%
+  \textbf{#1}\hfill #4\\
+  #2\ifx&#3&\else\ \textperiodcentered\ \textit{#3}\fi\par}
+
+\begin{document}
+\fontsize{10.5}{12.8}\selectfont
+
+\begin{center}
+  {\LARGE\bfseries ((( name )))}\\[4pt]
+  ((( contact_line )))
+\end{center}
+
+\section{Summary}
+((( summary )))
+
+\section{Skills}
+((* for g in skills *))
+\textbf{((( g['label'] ))):} ((( g['items'] | join(', ') )))\par
+((* endfor *))
+
+\section{Experience}
+((* for e in experience *))
+\entry{((( e.title )))}{((( e.org )))}{((( e.location )))}{((( e.dates )))}
+\begin{itemize}
+((* for b in e.bullets *))
+  \item ((( b )))
+((* endfor *))
+\end{itemize}
+((* if not loop.last *))\vspace{3pt}((* endif *))
+((* endfor *))
+
+((* if projects *))
+\section{Research \& Projects}
+((* for p in projects *))
+\entry{((( p.title )))}{((( p.venue )))}{}{((( p.dates )))}
+\begin{itemize}
+((* for b in p.bullets *))
+  \item ((( b )))
+((* endfor *))
+\end{itemize}
+((* if not loop.last *))\vspace{3pt}((* endif *))
+((* endfor *))
+((* endif *))
+
+\section{Education}
+((* for ed in education *))
+\entry{((( ed.degree )))}{((( ed.school )))}{((( ed.location )))}{((( ed.dates )))}
+((* if ed.coursework *))\textit{Coursework:} ((( ed.coursework | join(', ') )))\par((* endif *))
+((* if not loop.last *))\vspace{4pt}((* endif *))
+((* endfor *))
+
+\end{document}

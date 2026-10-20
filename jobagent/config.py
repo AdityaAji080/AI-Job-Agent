@@ -18,6 +18,8 @@ RESUME_PATH = PROFILE_DIR / "resume.md"
 CRITERIA_PATH = PROFILE_DIR / "criteria.md"
 # Optional. One "weight  regex" per line; used to put the best-fitting jobs first.
 FIT_KEYWORDS_PATH = PROFILE_DIR / "fit_keywords.txt"
+# Structured CV content: the only source the tailored CVs may draw from.
+CV_SOURCE_PATH = PROFILE_DIR / "cv_source.yaml"
 
 JOBS_CSV = DATA_DIR / "jobs.csv"
 SEEN_CSV = DATA_DIR / "seen.csv"

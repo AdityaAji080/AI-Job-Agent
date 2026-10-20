@@ -1,0 +1,67 @@
+# Example: structured CV content. Copy to your private profile/ and fill in.
+#
+# Tailored CVs are a selection and rewording of this file and nothing else.
+# Titles, employers, dates and contact details are always copied from here.
+# Every bullet needs an id that is unique within its entry. A rewritten bullet
+# may only use numbers from its own source bullet or its entry's header.
+
+name: Jane Example
+
+layout:
+  max_pages: 1
+
+contact:
+  email: jane@example.com
+  phone: "+1 555 0100"
+  location: Toronto, Canada
+  linkedin: ""
+  github: github.com/jane-example
+
+summary: >-
+  Three years building backend services in Python and Go. Finishing an MSc in
+  Machine Learning.
+
+skills:
+  - label: Languages
+    items: [Python, Go, SQL]
+  - label: Infrastructure
+    items: [PostgreSQL, Kubernetes, Kafka]
+  - label: ML
+    items: [PyTorch, scikit-learn]
+
+experience:
+  - id: logistics
+    title: Software Engineer
+    org: Example Logistics
+    location: Toronto, Canada
+    dates: 2022 – 2025
+    bullets:
+      - id: pricing
+        text: Built an event-driven pricing service handling 2K requests/second.
+      - id: migration
+        text: Migrated 14 batch jobs to Kafka streams, cutting data latency from hours to seconds.
+      - id: oncall
+        text: Ran the team's on-call rotation and wrote the incident runbooks.
+
+projects:
+  - id: thesis
+    title: Uncertainty Estimates for Delivery-Time Prediction
+    venue: MSc thesis
+    dates: "2026"
+    bullets:
+      - id: model
+        text: Trained gradient-boosted and neural models on 3M historical deliveries.
+      - id: calib
+        text: Improved calibration error by 40% over the production baseline.
+
+education:
+  - degree: MSc, Machine Learning
+    school: Example University
+    location: Toronto, Canada
+    dates: 2025 – 2026
+    coursework: [Deep Learning, Probabilistic Models, Optimization]
+  - degree: BSc, Computer Science
+    school: Example College
+    location: Ottawa, Canada
+    dates: 2018 – 2022
+    coursework: []
