@@ -117,21 +117,19 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
 
         # 2. Draft.
         log("  drafting")
-        cv = llm.tool_input(step("draft", llm.draft_request(source, posting))[-1], "submit_cv")
+        cv = llm.reply_json(step("draft", llm.draft_request(source, posting))[-1])
         record["draft"] = cv
 
         # 3. Review, and revise unless it's ready.
         log("  reviewing")
-        review = llm.tool_input(step("critique", llm.critique_request(source, posting, cv, notes))[-1],
-                                "submit_review")
+        review = llm.reply_json(step("critique", llm.critique_request(source, posting, cv, notes))[-1])
         record["review"] = review
         if review.get("verdict") != "ready" or review.get("grounding"):
             log(f"  revising ({len(review.get('grounding') or [])} grounding, "
                 f"{len(review.get('coverage') or [])} coverage, "
                 f"{len(review.get('emphasis') or [])} emphasis points)")
             gaps = cv.get("gaps", [])
-            cv = llm.tool_input(step("revise", llm.revise_request(source, posting, cv, review))[-1],
-                                "submit_cv")
+            cv = llm.reply_json(step("revise", llm.revise_request(source, posting, cv, review))[-1])
             cv.setdefault("gaps", gaps)
 
         # 4. The automatic content checks, with up to two repair attempts.
@@ -142,8 +140,7 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
                 break
             log(f"  repairing {len(errors)} check failure(s), attempt {attempt + 1}")
             gaps = cv.get("gaps", [])
-            cv = llm.tool_input(step("repair", llm.repair_request(source, posting, cv, errors))[-1],
-                                "submit_cv")
+            cv = llm.reply_json(step("repair", llm.repair_request(source, posting, cv, errors))[-1])
             cv.setdefault("gaps", gaps)
             problems = check_content(source, cv)
         (out / "tailored.json").write_text(json.dumps(cv, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -163,6 +160,10 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
                              error="" if ok else "PDF checks failed"))
     except llm.TailorError as exc:
         return finish(Result(False, out, error=str(exc)))
+    except Exception as exc:  # an API error: keep what was spent and the steps so far
+        if type(exc).__module__.split(".")[0] != "anthropic":
+            raise
+        return finish(Result(False, out, error=f"API error: {exc}"))
 
 
 def tailor_url(client, source: dict, url: str, *, posting_file: Path | None = None,

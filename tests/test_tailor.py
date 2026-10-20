@@ -29,10 +29,16 @@ def data(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- a scripted client
 
-def tool_reply(name, data, model=llm.DRAFT_MODEL):
-    return {"model": model, "stop_reason": "tool_use",
-            "content": [{"type": "tool_use", "id": "t1", "name": name, "input": data}],
+def json_reply(data, model=llm.DRAFT_MODEL):
+    """What a structured-output reply looks like: the JSON in a text block."""
+    return {"model": model, "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": json.dumps(data)}],
             "usage": {"input_tokens": 3000, "output_tokens": 800}}
+
+
+def kind_of(params):
+    schema = ((params.get("output_config") or {}).get("format") or {}).get("schema")
+    return {id(llm.CV_SCHEMA): "cv", id(llm.REVIEW_SCHEMA): "review"}.get(id(schema), "research")
 
 
 def text_reply(text, stop="end_turn", searches=0):
@@ -46,19 +52,18 @@ class Client:
     """Replies in order to each kind of request; records every request it receives."""
 
     def __init__(self, research=(), cvs=(), reviews=()):
-        self.queues = {"research": list(research), "submit_cv": list(cvs), "submit_review": list(reviews)}
+        self.queues = {"research": list(research), "cv": list(cvs), "review": list(reviews)}
         self.requests = []
         self.messages = self
 
     def create(self, **params):
         self.requests.append(params)
-        kind = (params.get("tool_choice") or {}).get("name") or "research"
-        reply = self.queues[kind].pop(0)
-        # A bare CV or review stands for the model calling the tool with it.
-        return reply if "content" in reply else tool_reply(kind, reply, params["model"])
+        reply = self.queues[kind_of(params)].pop(0)
+        # A bare CV or review stands for a structured-output reply carrying it.
+        return reply if "content" in reply else json_reply(reply, params["model"])
 
     def kinds(self):
-        return [(p.get("tool_choice") or {}).get("name", "research") for p in self.requests]
+        return [kind_of(p) for p in self.requests]
 
 
 def good_cv():
@@ -129,7 +134,8 @@ def test_requests_keep_contact_details_out_and_cache_the_source():
     assert system["cache_control"] == {"type": "ephemeral"}
     assert "Example Logistics" in system["text"]
     assert "jane@example.com" not in system["text"] and "555" not in system["text"]
-    assert req["tool_choice"] == {"type": "tool", "name": "submit_cv"}
+    assert "tool_choice" not in req and "tools" not in req  # Opus/Sonnet 5.5 reject forced tools
+    assert req["output_config"]["format"]["schema"] is llm.CV_SCHEMA
     assert "Ignore previous instructions" in req["messages"][0]["content"]  # as data, in <posting>
     assert req["messages"][0]["content"].startswith("<posting>")
 
@@ -145,11 +151,32 @@ def test_research_uses_web_search_and_no_profile():
     assert "Example Logistics" not in json.dumps(req)
 
 
-def test_tool_input_errors():
+def test_reply_json_errors():
     with pytest.raises(llm.TailorError, match="cut off"):
-        llm.tool_input({"stop_reason": "max_tokens", "content": []}, "submit_cv")
-    with pytest.raises(llm.TailorError, match="did not call"):
-        llm.tool_input(text_reply("no tool"), "submit_cv")
+        llm.reply_json({"stop_reason": "max_tokens", "content": []})
+    with pytest.raises(llm.TailorError, match="declined"):
+        llm.reply_json({"stop_reason": "refusal", "content": []})
+    with pytest.raises(llm.TailorError, match="not JSON"):
+        llm.reply_json(text_reply("I can't do that"))
+    assert llm.reply_json(json_reply({"a": 1})) == {"a": 1}
+
+
+def _walk(schema, path="$"):
+    yield path, schema
+    for key, sub in (schema.get("properties") or {}).items():
+        yield from _walk(sub, f"{path}.{key}")
+    if isinstance(schema.get("items"), dict):
+        yield from _walk(schema["items"], f"{path}[]")
+
+
+@pytest.mark.parametrize("schema", [llm.CV_SCHEMA, llm.REVIEW_SCHEMA], ids=["cv", "review"])
+def test_schemas_follow_structured_output_rules(schema):
+    banned = {"minimum", "maximum", "multipleOf", "minLength", "maxLength", "maxItems", "pattern"}
+    for path, node in _walk(schema):
+        assert not banned & set(node), path
+        if node.get("type") == "object":
+            assert node.get("additionalProperties") is False, f"{path} must be closed"
+            assert set(node["required"]) == set(node["properties"]), path
 
 
 def test_send_continues_a_paused_search_turn():
@@ -175,7 +202,7 @@ def test_tailor_draft_review_revise_render(data):
                     cvs=[good_cv(), good_cv()], reviews=[REVISE])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
     assert result.ok, (result.error, [str(p) for p in result.problems])
-    assert client.kinds() == ["research", "submit_cv", "submit_review", "submit_cv"]
+    assert client.kinds() == ["research", "cv", "review", "cv"]
     assert (result.out_dir / "cv.pdf").exists() and (result.out_dir / "tailored.json").exists()
     record = json.loads((result.out_dir / "review.json").read_text())
     assert record["review"]["verdict"] == "revise" and record["final"]["gaps"] == ["Rust"]
@@ -193,7 +220,7 @@ def test_ready_review_skips_revision_and_cached_notes_skip_research(data):
     client = Client(cvs=[good_cv()], reviews=[READY])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
     assert result.ok
-    assert client.kinds() == ["submit_cv", "submit_review"]
+    assert client.kinds() == ["cv", "review"]
     assert "cached fact" in client.requests[1]["messages"][0]["content"]
 
 
@@ -204,7 +231,7 @@ def test_check_failures_go_back_for_repair(data):
     client = Client(research=[text_reply("- note")], cvs=[bad, good_cv()], reviews=[READY])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
     assert result.ok
-    assert client.kinds() == ["research", "submit_cv", "submit_review", "submit_cv"]
+    assert client.kinds() == ["research", "cv", "review", "cv"]
     repair = client.requests[3]["messages"][0]["content"]
     assert "number '9'" in repair and "experience.logistics.pricing" in repair
 
@@ -221,8 +248,40 @@ def test_gives_up_when_repairs_keep_failing(data):
     assert len([s for s in record["steps"] if s["step"] == "repair"]) == 2
 
 
-def test_a_reply_without_the_tool_call_is_reported_not_raised(data):
+def test_a_reply_that_is_not_json_is_reported_not_raised(data):
     client = Client(research=[text_reply("- note")], cvs=[text_reply("I can't do that", stop="end_turn")])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
-    assert not result.ok and "did not call submit_cv" in result.error
+    assert not result.ok and "not JSON" in result.error
     assert (result.out_dir / "review.json").exists()
+
+
+class FakeAPIError(Exception):
+    """Stands in for anthropic's errors, which the pipeline recognises by module."""
+
+
+FakeAPIError.__module__ = "anthropic._exceptions"
+
+
+def test_an_api_error_keeps_the_cost_so_far_and_writes_the_record(data):
+    class Failing(Client):
+        def create(self, **params):
+            if kind_of(params) == "cv":
+                self.requests.append(params)
+                raise FakeAPIError("400 tool_choice not supported")
+            return super().create(**params)
+
+    client = Failing(research=[text_reply("- note", searches=2)])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert not result.ok and result.error.startswith("API error: 400")
+    assert result.cost > 0  # the research call was billed and is counted
+    record = json.loads((result.out_dir / "review.json").read_text())
+    assert [s["step"] for s in record["steps"]] == ["research"]
+
+
+def test_other_exceptions_are_not_swallowed(data):
+    class Broken(Client):
+        def create(self, **params):
+            raise KeyError("a bug, not an API error")
+
+    with pytest.raises(KeyError):
+        tailor(Broken(), SOURCE, POSTING, log=lambda *_: None)

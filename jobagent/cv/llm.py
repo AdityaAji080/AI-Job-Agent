@@ -34,64 +34,42 @@ class TailorError(Exception):
 
 # ---------------------------------------------------------------- tool schemas
 
-_BULLETS = {"type": "array", "items": {
-    "type": "object",
-    "properties": {"from": {"type": "string", "description": "id of the source bullet"},
-                   "text": {"type": "string"}},
-    "required": ["from", "text"]}}
+def _obj(props: dict) -> dict:
+    """Structured outputs need every object closed; listing every property as required
+    keeps the shape exact (an optional field comes back as an empty string or list)."""
+    return {"type": "object", "properties": props, "required": list(props),
+            "additionalProperties": False}
 
-CV_TOOL = {
-    "name": "submit_cv",
-    "description": "Submit the complete tailored CV. Call exactly once.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "skills": {"type": "array", "items": {
-                "type": "object",
-                "properties": {"label": {"type": "string"},
-                               "items": {"type": "array", "items": {"type": "string"}}},
-                "required": ["label", "items"]}},
-            "experience": {"type": "array", "items": {
-                "type": "object", "properties": {"id": {"type": "string"}, "bullets": _BULLETS},
-                "required": ["id", "bullets"]}},
-            "projects": {"type": "array", "items": {
-                "type": "object", "properties": {"id": {"type": "string"}, "bullets": _BULLETS},
-                "required": ["id", "bullets"]}},
-            "coursework": {"type": "array", "items": {"type": "string"}},
-            "gaps": {"type": "array", "items": {"type": "string"},
-                     "description": "Main posting requirements the source can't support"},
-        },
-        "required": ["summary", "skills", "experience", "projects", "coursework", "gaps"],
-    },
-}
 
-REVIEW_TOOL = {
-    "name": "submit_review",
-    "description": "Submit the review. Call exactly once.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "verdict": {"type": "string", "enum": ["ready", "revise"]},
-            "grounding": {"type": "array", "items": {
-                "type": "object",
-                "properties": {"where": {"type": "string"}, "quote": {"type": "string"},
-                               "problem": {"type": "string"}},
-                "required": ["where", "problem"]}},
-            "coverage": {"type": "array", "items": {
-                "type": "object",
-                "properties": {"requirement": {"type": "string"},
-                               "source_bullet": {"type": "string"}},
-                "required": ["requirement"]}},
-            "emphasis": {"type": "array", "items": {
-                "type": "object",
-                "properties": {"where": {"type": "string"}, "suggestion": {"type": "string"}},
-                "required": ["suggestion"]}},
-            "overall": {"type": "string"},
-        },
-        "required": ["verdict", "grounding", "coverage", "emphasis", "overall"],
-    },
-}
+_STR = {"type": "string"}
+_STRS = {"type": "array", "items": _STR}
+_BULLETS = {"type": "array", "items": _obj({
+    "from": {"type": "string", "description": "id of the source bullet"}, "text": _STR})}
+_ENTRIES = {"type": "array", "items": _obj({"id": _STR, "bullets": _BULLETS})}
+
+CV_SCHEMA = _obj({
+    "summary": _STR,
+    "skills": {"type": "array", "items": _obj({"label": _STR, "items": _STRS})},
+    "experience": _ENTRIES,
+    "projects": _ENTRIES,
+    "coursework": _STRS,
+    "gaps": {"type": "array", "items": _STR,
+             "description": "Main posting requirements the source can't support"},
+})
+
+REVIEW_SCHEMA = _obj({
+    "verdict": {"type": "string", "enum": ["ready", "revise"]},
+    "grounding": {"type": "array", "items": _obj({"where": _STR, "quote": _STR, "problem": _STR})},
+    "coverage": {"type": "array", "items": _obj({"requirement": _STR, "source_bullet": _STR})},
+    "emphasis": {"type": "array", "items": _obj({"where": _STR, "suggestion": _STR})},
+    "overall": _STR,
+})
+
+
+def _json_output(schema: dict) -> dict:
+    # Opus 5.5 and Sonnet 5.5 reject forced tool use; structured outputs guarantee the shape.
+    return {"format": {"type": "json_schema", "schema": schema}}
+
 
 WEB_SEARCH = {"type": "web_search_20250305", "name": "web_search", "max_uses": RESEARCH_SEARCHES}
 
@@ -127,7 +105,7 @@ def draft_request(source: dict, posting: dict) -> dict:
     return {
         "model": DRAFT_MODEL, "max_tokens": 4096,
         "system": _system(prompts.DRAFTER, source),
-        "tools": [CV_TOOL], "tool_choice": {"type": "tool", "name": "submit_cv"},
+        "output_config": _json_output(CV_SCHEMA),
         "messages": [{"role": "user", "content": _posting_block(posting)}],
     }
 
@@ -152,7 +130,7 @@ def critique_request(source: dict, posting: dict, cv: dict, notes: str = "") -> 
     return {
         "model": REVIEW_MODEL, "max_tokens": 3000,
         "system": _system(prompts.CRITIC, source),
-        "tools": [REVIEW_TOOL], "tool_choice": {"type": "tool", "name": "submit_review"},
+        "output_config": _json_output(REVIEW_SCHEMA),
         "messages": [{"role": "user", "content": "\n\n".join(parts)}],
     }
 
@@ -161,7 +139,7 @@ def revise_request(source: dict, posting: dict, cv: dict, review: dict) -> dict:
     return {
         "model": DRAFT_MODEL, "max_tokens": 4096,
         "system": _system(prompts.DRAFTER, source),
-        "tools": [CV_TOOL], "tool_choice": {"type": "tool", "name": "submit_cv"},
+        "output_config": _json_output(CV_SCHEMA),
         "messages": [{"role": "user", "content": "\n\n".join([
             _posting_block(posting),
             f"<draft_cv>\n{_cv_json(cv)}\n</draft_cv>",
@@ -175,7 +153,7 @@ def repair_request(source: dict, posting: dict, cv: dict, problems: list) -> dic
     return {
         "model": DRAFT_MODEL, "max_tokens": 4096,
         "system": _system(prompts.DRAFTER, source),
-        "tools": [CV_TOOL], "tool_choice": {"type": "tool", "name": "submit_cv"},
+        "output_config": _json_output(CV_SCHEMA),
         "messages": [{"role": "user", "content": "\n\n".join([
             _posting_block(posting),
             f"<draft_cv>\n{_cv_json(cv)}\n</draft_cv>",
@@ -196,17 +174,21 @@ def _blocks(message) -> list:
     return field(message, "content") or []
 
 
-def tool_input(message, name: str) -> dict:
+def reply_json(message) -> dict:
+    """The JSON object a structured-output reply carries in its text."""
     stop = field(message, "stop_reason")
     if stop == "max_tokens":
         raise TailorError("reply was cut off (max_tokens)")
     if stop == "refusal":
         raise TailorError("the model declined this request")
-    for block in _blocks(message):
-        if field(block, "type") == "tool_use" and field(block, "name") == name:
-            data = field(block, "input")
-            return dict(data) if data is not None else {}
-    raise TailorError(f"reply did not call {name} (stop_reason: {stop})")
+    text = text_of(message)
+    try:
+        data = json.loads(text)
+    except ValueError:
+        raise TailorError(f"reply was not JSON (stop_reason: {stop}): {text[:120]!r}")
+    if not isinstance(data, dict):
+        raise TailorError("reply JSON was not an object")
+    return data
 
 
 def text_of(message) -> str:
