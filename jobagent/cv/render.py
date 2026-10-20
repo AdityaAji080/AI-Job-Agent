@@ -64,7 +64,8 @@ def context(source: dict, cv: dict) -> dict:
     wanted = {c.lower() for c in cv.get("coursework") or []}
     education = [{**ed, "coursework": [c for c in ed.get("coursework") or [] if c.lower() in wanted]}
                  for ed in source.get("education") or []]
-    return {"name": source["name"], "contact_line": "  |  ".join(contact),
+    return {"name": source["name"], "headline": source.get("headline", ""),
+            "contact_line": " | ".join(contact),
             "summary": cv["summary"], "skills": [g for g in cv["skills"] if g.get("items")],
             "experience": merged("experience"), "projects": merged("projects"),
             "education": education}

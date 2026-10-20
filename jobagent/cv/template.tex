@@ -2,77 +2,80 @@
 %% and the tailored selection. Every interpolated value is LaTeX-escaped.
 %% Jinja delimiters are triple parentheses for values and paren-star for statements,
 %% so they never clash with LaTeX braces. See render.py.
-\documentclass[10pt,a4paper]{article}
+\documentclass[10pt,letterpaper]{article}
 \usepackage[T1]{fontenc}
-\usepackage{charter}
-\usepackage[margin=1.6cm,top=1.4cm,bottom=1.4cm]{geometry}
+\usepackage[scaled=0.92]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[letterspace=180]{microtype}
+\usepackage[left=1.45cm,right=1.45cm,top=1.2cm,bottom=1.1cm]{geometry}
 \usepackage{enumitem}
 \usepackage{titlesec}
-\usepackage{xcolor}
 \usepackage[hidelinks,pdfusetitle]{hyperref}
 % Map every glyph to Unicode so applicant-tracking systems can read the text layer.
 \input{glyphtounicode}
 \pdfgentounicode=1
 
 \hypersetup{pdftitle={((( name ))) CV}, pdfauthor={((( name )))}}
-\definecolor{rule}{gray}{0.55}
 \pagestyle{empty}
 \setlength{\parindent}{0pt}
-\linespread{1.04}
+\linespread{1.08}
 
-\titleformat{\section}{\large\bfseries}{}{0pt}{}[\vspace{1pt}{\color{rule}\titlerule}]
-\titlespacing*{\section}{0pt}{9pt}{5pt}
-\setlist[itemize]{leftmargin=1.1em, itemsep=1.5pt, parsep=0pt, topsep=2pt, label=\textbullet}
+% Section headings: bold, letter-spaced capitals over a full-width rule.
+\titleformat{\section}{\normalsize\bfseries}{}{0pt}{\lsstyle\MakeUppercase}[\vspace{-1pt}\titlerule]
+\titlespacing*{\section}{0pt}{7pt}{4pt}
+\setlist[itemize]{leftmargin=1.4em, itemsep=0.6pt, parsep=0pt, topsep=1.5pt, label=\textbullet}
 
-\newcommand{\entry}[4]{%
-  \textbf{#1}\hfill #4\\
-  #2\ifx&#3&\else\ \textperiodcentered\ \textit{#3}\fi\par}
+% \entry{bold title}{rest of the header line}{dates}
+\newcommand{\entry}[3]{\textbf{#1}\ifx&#2&\else, #2\fi\hfill\textit{#3}\par}
 
 \begin{document}
-\fontsize{10.5}{12.8}\selectfont
 
 \begin{center}
-  {\LARGE\bfseries ((( name )))}\\[4pt]
-  ((( contact_line )))
+  {\Large\bfseries\lsstyle\MakeUppercase{((( name )))}}\\[3pt]
+((* if headline *))
+  {\bfseries ((( headline )))}\\[2pt]
+((* endif *))
+  {\small ((( contact_line )))}
 \end{center}
+\vspace{-6pt}
 
 \section{Summary}
 ((( summary )))
 
 \section{Skills}
 ((* for g in skills *))
-\textbf{((( g['label'] ))):} ((( g['items'] | join(', ') )))\par
+\textbf{((( g['label'] ))):}\ ((( g['items'] | join(', ') )))\par
 ((* endfor *))
 
 \section{Experience}
 ((* for e in experience *))
-\entry{((( e.title )))}{((( e.org )))}{((( e.location )))}{((( e.dates )))}
+\entry{((( e.title )))}{((( [e.org, e.location] | select | join(', ') )))}{((( e.dates )))}
 \begin{itemize}
 ((* for b in e.bullets *))
   \item ((( b )))
 ((* endfor *))
 \end{itemize}
-((* if not loop.last *))\vspace{3pt}((* endif *))
+((* if not loop.last *))\vspace{2pt}((* endif *))
 ((* endfor *))
 
 ((* if projects *))
-\section{Research \& Projects}
+\section{Projects}
 ((* for p in projects *))
-\entry{((( p.title )))}{((( p.venue )))}{}{((( p.dates )))}
+\entry{((( p.title )))}{((( p.venue )))}{((( p.dates )))}
 \begin{itemize}
 ((* for b in p.bullets *))
   \item ((( b )))
 ((* endfor *))
 \end{itemize}
-((* if not loop.last *))\vspace{3pt}((* endif *))
+((* if not loop.last *))\vspace{2pt}((* endif *))
 ((* endfor *))
 ((* endif *))
 
 \section{Education}
 ((* for ed in education *))
-\entry{((( ed.degree )))}{((( ed.school )))}{((( ed.location )))}{((( ed.dates )))}
-((* if ed.coursework *))\textit{Coursework:} ((( ed.coursework | join(', ') )))\par((* endif *))
-((* if not loop.last *))\vspace{4pt}((* endif *))
+\entry{((( ed.degree )))}{((( [ed.school, ed.location] | select | join(', ') )))}{((( ed.dates )))}
+((* if ed.coursework *))Coursework: ((( ed.coursework | join(', ') ))).\par((* endif *))
+((* if not loop.last *))\vspace{3pt}((* endif *))
 ((* endfor *))
 
 \end{document}

@@ -105,7 +105,7 @@ def test_roles_render_in_source_order_whatever_the_model_returns():
     cv = tailored()
     cv["projects"] = []
     tex = render_tex(SOURCE, cv)
-    assert "Research \\& Projects" not in tex
+    assert "\\section{Projects}" not in tex
 
 
 def test_drop_one_bullet_takes_the_last_bullet_of_the_longest_entry():
