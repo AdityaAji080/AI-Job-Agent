@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from pathlib import Path
 
 import jinja2
@@ -161,31 +162,43 @@ def drop_one_bullet(cv: dict, min_per_role: int = 2) -> str | None:
     return f"{section}.{entry['id']}.{gone['from']}"
 
 
+def pdf_filename(source: dict) -> str:
+    """What recruiters see when the CV is uploaded: 'Jane_Example_CV.pdf'."""
+    plain = unicodedata.normalize("NFKD", source.get("name", "")).encode("ascii", "ignore").decode()
+    name = re.sub(r"[^A-Za-z0-9]+", "_", plain).strip("_")
+    return f"{name}_CV.pdf" if name else "CV.pdf"
+
+
 def build(source: dict, cv: dict, out_dir: Path, max_pages: int | None = None,
           fit: bool = True) -> tuple[Path | None, list[Problem]]:
-    """Render, compile and check. Writes cv.tex always and cv.pdf when it compiles.
+    """Render, compile and check. Writes cv.tex always, and the PDF (named after the
+    candidate, see pdf_filename) when it compiles.
 
     With `fit`, a CV that runs past its page limit loses its least important bullets
     one at a time until it fits; each removal is reported, never silent.
     """
     max_pages = max_pages or (source.get("layout") or {}).get("max_pages") or MAX_PAGES
     out_dir.mkdir(parents=True, exist_ok=True)
+    pdf = out_dir / pdf_filename(source)
+    legacy = out_dir / "cv.pdf"  # the name used before; never leave two CVs in one folder
+    if legacy != pdf and legacy.exists():
+        legacy.unlink()
     dropped: list[str] = []
     while True:
         tex = render_tex(source, cv)
         (out_dir / "cv.tex").write_text(tex, encoding="utf-8")
-        ok, note = compile_pdf(tex, out_dir / "cv.pdf")
+        ok, note = compile_pdf(tex, pdf)
         if not ok:
             return None, [Problem("error", "compile", note)]
-        if not fit or page_count(out_dir / "cv.pdf") <= max_pages:
+        if not fit or page_count(pdf) <= max_pages:
             break
         gone = drop_one_bullet(cv)
         if gone is None:
             break
         dropped.append(gone)
-    problems = check_pdf(out_dir / "cv.pdf", source, cv, max_pages)
+    problems = check_pdf(pdf, source, cv, max_pages)
     if dropped:
         problems.append(Problem("warn", "fit", f"dropped to fit {max_pages} page(s): {', '.join(dropped)}"))
     if note:
         problems.append(Problem("warn", "layout", note))
-    return out_dir / "cv.pdf", problems
+    return pdf, problems

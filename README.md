@@ -161,7 +161,8 @@ job's `review.json`), or `skipped: posting closed`. Clear the cell to have it tr
 
 The posting text comes from `data/postings/`, which `add_jobs` fills as jobs are recorded;
 older tracker rows are re-read from their job board (`python -m jobagent.postings URL`).
-Output goes to `data/applications/<company>_<role>_<id>/`: `cv.pdf`, `tailored.json`, and
+Output goes to `data/applications/<company>_<role>_<id>/`: the PDF (named after you, e.g.
+`Jane_Example_CV.pdf`, since that is what recruiters see), `tailored.json`, and
 `review.json` with every step, the review, any gaps the posting asks for that your CV can't
 support, and the token usage. The tracker's `cv` column points to the PDF.
 
