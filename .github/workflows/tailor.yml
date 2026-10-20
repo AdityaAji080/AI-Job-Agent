@@ -1,6 +1,9 @@
 name: Tailor CVs
 
-# Run by hand: Actions -> Tailor CVs -> Run workflow, pick the branch, paste posting URLs.
+# Run by hand: Actions -> Tailor CVs -> Run workflow.
+#   With URLs: tailors just those postings now, at standard prices (a few minutes).
+#   Without:   works through every tracked job that has no CV yet, newest first, through
+#              the Batch API at half price (usually within the hour). Use it to catch up.
 # CVs are committed to the private data repository only. This repository is public, and
 # anything attached to a run here (artifacts) can be downloaded by any GitHub user.
 
@@ -8,8 +11,13 @@ on:
   workflow_dispatch:
     inputs:
       urls:
-        description: "Posting URLs from your tracker, separated by spaces"
-        required: true
+        description: "Posting URLs, separated by spaces. Leave empty to tailor the backlog."
+        required: false
+        default: ""
+      max:
+        description: "Backlog only: most jobs to take on in this run"
+        required: false
+        default: "150"
 
 # Shares the search run's group, so the two never push to the data repo at the same time.
 concurrency:
@@ -19,7 +27,7 @@ concurrency:
 jobs:
   tailor:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 330
     env:
       JOBAGENT_HOME: private
     steps:
@@ -43,12 +51,17 @@ jobs:
       - name: Tailor
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Passed through the environment, never pasted into the script, so a URL can't
+          # Passed through the environment, never pasted into the script, so input can't
           # inject shell commands.
           URLS: ${{ inputs.urls }}
+          MAX: ${{ inputs.max }}
         run: |
           set -f  # no filename expansion of the URLs
-          python -m jobagent.cv tailor $URLS
+          if [ -n "$URLS" ]; then
+            python -m jobagent.cv tailor $URLS
+          else
+            python -m jobagent.cv batch --max "$MAX" --deadline-minutes 300
+          fi
 
       - name: Save to the data repository
         if: always()
@@ -56,6 +69,9 @@ jobs:
         run: |
           git config user.name "job-agent"
           git config user.email "job-agent@users.noreply.github.com"
+          # Take in any tracker edits made during the run, then add the CV paths on top.
+          git pull --rebase --autostash
+          (cd .. && python -m jobagent.cv apply-updates)
           git add data
           if git diff --cached --quiet; then
             echo "Nothing new to save."

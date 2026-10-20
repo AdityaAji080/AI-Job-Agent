@@ -80,7 +80,7 @@ jobagent/
   prompt.py       the run instructions (profile-specific text comes from your files)
   seed.py         add boards by hand, or from an existing tracker
   postings.py     saved posting text, and re-reading a posting from its job board
-  cv/             tailored CVs: model requests, content rules, LaTeX template, PDF checks
+  cv/             tailored CVs: model requests, batch runs, content rules, LaTeX template, PDF checks
 tests/            adapter parsing, URL detection, filters, dedup, and the agent's tools
 example/profile/  sample resume and criteria
 ```
@@ -108,7 +108,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Variable `DATA_REPO`: `your-username/job-agent-data`
    - Optional variables `MAX_BUDGET_USD` (default 5.00), `MAX_NEW_JOBS` (default 25),
      `MAX_US_JOBS` (default 5), `MAX_PER_COMPANY` (default 3), `TOP_MARKET_SHARE`
-     (default 0.4) and `JOBAGENT_MODEL` (default `sonnet`; set to `opus` for the larger model)
+     (default 0.4), `JOBAGENT_MODEL` (default `sonnet`; set to `opus` for the larger model)
+     and `MAX_TAILOR` (default 40: CVs tailored per scheduled run)
 
 4. **Check the boards first.** Actions → Job search run → Run workflow → *harvest-only*.
    This reads every board and prints the pool without calling the model.
@@ -147,6 +148,16 @@ For each tracked posting this runs five steps, each a single API request:
 4. **Revise** with that review (Opus), skipped when the review says it's ready.
 5. **Check and render**: the content checks below, with up to two repair requests if they
    fail, then the PDF build and its checks.
+
+**Automatically, after every scheduled search**, a second job tailors CVs for tracked jobs
+that don't have one yet (status `new`, not applied to), newest first, up to `MAX_TAILOR`
+per run. It sends the same requests through the Batch API at half price, about $0.07–0.10
+per CV. Just before tailoring, each posting is re-read from its job board, and one that
+has closed is skipped. A batch still running when the job's time runs out is collected by
+the next run. To catch up on a backlog, run **Actions → Tailor CVs** with the URL box empty.
+
+The tracker's `cv` column then holds the PDF's path, `failed: <reason>` (details in that
+job's `review.json`), or `skipped: posting closed`. Clear the cell to have it tried again.
 
 The posting text comes from `data/postings/`, which `add_jobs` fills as jobs are recorded;
 older tracker rows are re-read from their job board (`python -m jobagent.postings URL`).
@@ -193,6 +204,7 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 | `postings/` | The text of each recorded posting, saved when it was recorded. |
 | `applications/` | Tailored CVs, one folder per posting. |
 | `companies/` | Company research notes used by the CV reviewer, reused for 45 days. |
+| `tailor_state.json` | CV tailoring in progress between runs (normally empty). |
 
 ## Adding a job-board system
 

@@ -121,31 +121,49 @@ def _boards_for(url: str, company: str) -> list[Board]:
             if e.ats != "mycareersfuture" and want and store.company_key(e.company) == want]
 
 
-async def refetch(url: str, company: str = "") -> Posting | None:
-    """Re-read one posting from its job board. None when it can't be found there.
+OPEN, CLOSED, UNKNOWN = "open", "closed", "unknown"
 
-    Raises nothing for network trouble: a posting that can't be read is simply None,
-    and the caller falls back to a pasted posting.
+
+async def check(url: str, company: str = "") -> tuple[str, Posting | None]:
+    """Re-read one posting and say whether it is still open.
+
+    CLOSED needs positive evidence: the board says so, the posting's own address
+    answers 404, or the URL's own board was read in full and no longer lists it.
+    Anything else that goes wrong (network trouble, a board found only by company
+    name) is UNKNOWN, never CLOSED, so a flaky request can't retire a live job.
     """
+    from .ats.base import BoardError
     async with make_client() as client:
         try:
             if "mycareersfuture.gov.sg" in url:
-                return await _from_mcf(client, url)
+                p = await _from_mcf(client, url)
+                return (CLOSED if p and p.extra.get("closed") else OPEN if p else UNKNOWN), p
+            direct = detect_board(url, company) is not None
             for board in _boards_for(url, company):
                 adapter = ADAPTERS.get(board.ats)
                 if adapter is None:
                     continue
                 if board.ats == "workday":
-                    found = await _from_workday(client, board, url)
-                    if found:
-                        return found
+                    p = await _from_workday(client, board, url)
+                    if p:
+                        return (CLOSED if p.extra.get("closed") else OPEN), p
                     continue
                 for p in await adapter.fetch(client, board):
                     if _same_job(p, url):
-                        return await _read_detail(client, adapter, p)
+                        return OPEN, await _read_detail(client, adapter, p)
+                if direct:  # the posting's own board, read in full, no longer has it
+                    return CLOSED, None
+        except BoardError as exc:
+            return (CLOSED if "404" in str(exc) else UNKNOWN), None
         except Exception:
-            return None
-    return None
+            return UNKNOWN, None
+    return UNKNOWN, None
+
+
+async def refetch(url: str, company: str = "") -> Posting | None:
+    """Re-read one posting from its job board. None when it can't be read or has closed."""
+    status, posting = await check(url, company)
+    return posting if status == OPEN else None
 
 
 async def ensure(url: str, company: str = "", role: str = "") -> dict | None:

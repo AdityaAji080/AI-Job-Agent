@@ -79,3 +79,55 @@ jobs:
             git commit -m "Job search run $(date -u +%Y-%m-%d)"
             git push
           fi
+
+  # CVs for the jobs just recorded (and any backlog), through the Batch API at half price.
+  # Batches usually finish within the hour; one still running at the time limit is
+  # collected by the next run, so nothing is lost or paid for twice.
+  tailor:
+    needs: run
+    if: ${{ !cancelled() && github.event.inputs.mode != 'harvest-only' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      JOBAGENT_HOME: private
+    steps:
+      - uses: actions/checkout@v4
+
+      # Checked out after the search job has pushed, so it sees the jobs just recorded.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: private
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+
+      - name: Install LaTeX
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends
+             texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
+
+      - run: pip install -r requirements.txt
+
+      - name: Tailor CVs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MAX_TAILOR: ${{ vars.MAX_TAILOR || '40' }}
+        run: python -m jobagent.cv batch --max "$MAX_TAILOR" --deadline-minutes 300
+
+      - name: Save to the data repository
+        if: always()
+        working-directory: private
+        run: |
+          git config user.name "job-agent"
+          git config user.email "job-agent@users.noreply.github.com"
+          # Take in any tracker edits made while the batch ran, then add the CV paths on top.
+          git pull --rebase --autostash
+          (cd .. && python -m jobagent.cv apply-updates)
+          git add data
+          if git diff --cached --quiet; then
+            echo "Nothing new to save."
+          else
+            git commit -m "Tailored CVs $(date -u +%Y-%m-%d)"
+            git push
+          fi
