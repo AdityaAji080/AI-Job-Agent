@@ -1,0 +1,65 @@
+name: Tailor CVs
+
+# Run by hand: Actions -> Tailor CVs -> Run workflow, pick the branch, paste posting URLs.
+# CVs are committed to the private data repository only. This repository is public, and
+# anything attached to a run here (artifacts) can be downloaded by any GitHub user.
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "Posting URLs from your tracker, separated by spaces"
+        required: true
+
+# Shares the search run's group, so the two never push to the data repo at the same time.
+concurrency:
+  group: job-agent
+  cancel-in-progress: false
+
+jobs:
+  tailor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      JOBAGENT_HOME: private
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: private
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+
+      - name: Install LaTeX
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends
+             texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
+
+      - run: pip install -r requirements.txt
+
+      - name: Tailor
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Passed through the environment, never pasted into the script, so a URL can't
+          # inject shell commands.
+          URLS: ${{ inputs.urls }}
+        run: |
+          set -f  # no filename expansion of the URLs
+          python -m jobagent.cv tailor $URLS
+
+      - name: Save to the data repository
+        if: always()
+        working-directory: private
+        run: |
+          git config user.name "job-agent"
+          git config user.email "job-agent@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "Nothing new to save."
+          else
+            git commit -m "Tailored CVs $(date -u +%Y-%m-%d)"
+            git push
+          fi
