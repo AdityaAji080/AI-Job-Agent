@@ -4,7 +4,7 @@ A scheduled job-search agent that reads company job boards directly, has Claude 
 each opening against a written set of criteria, and keeps a deduplicated tracker that
 grows a little every run.
 
-It runs three times a week on GitHub Actions, costs a few dollars a run, and needs no
+It runs twice a week (Monday and Thursday) on GitHub Actions, costs a few dollars a run, and needs no
 machine left on.
 
 ## Why it's built this way

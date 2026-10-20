@@ -2,8 +2,8 @@ name: Job search run
 
 on:
   schedule:
-    # 01:17 UTC = 06:47 IST, Monday / Wednesday / Friday.
-    - cron: "17 1 * * 1,3,5"
+    # 01:17 UTC = 06:47 IST, Monday and Thursday.
+    - cron: "17 1 * * 1,4"
   workflow_dispatch:
     inputs:
       mode:
