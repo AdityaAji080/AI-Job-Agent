@@ -131,7 +131,7 @@ def test_two_jobs_through_every_stage(data):
     assert all(not j["cv"] for j in store.read_jobs())
     assert batch.apply_updates() == 2
     cvs = {j["url"]: j["cv"] for j in store.read_jobs()}
-    assert all(v.startswith("applications/") and v.endswith("cv.pdf") for v in cvs.values())
+    assert all(v.startswith("applications/") and v.endswith("/Jane_Example_CV.pdf") for v in cvs.values())
     rec = json.loads((config.DATA_DIR / cvs[b]).with_name("review.json").read_text())
     assert rec["mode"] == "batch" and [s["step"] for s in rec["steps"]][:2] == ["draft", "research"]
     assert rec["final"]["gaps"] == ["Rust"]  # the revision's empty gaps didn't wipe them
@@ -179,7 +179,7 @@ def test_check_failures_are_repaired_then_given_up_on(data):
     assert client.stages == [["draft"], ["critique"], ["repair"], ["repair"]]
     updates = batch.load_state()["tracker_updates"]
     assert updates[hopeless].startswith("failed: content checks")
-    assert updates[fixable].endswith("cv.pdf")
+    assert updates[fixable].endswith("/Jane_Example_CV.pdf")
 
 
 def test_an_errored_request_fails_only_its_job_and_expired_ones_wait(data):

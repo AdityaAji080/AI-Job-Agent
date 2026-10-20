@@ -203,7 +203,7 @@ def test_tailor_draft_review_revise_render(data):
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
     assert result.ok, (result.error, [str(p) for p in result.problems])
     assert client.kinds() == ["research", "cv", "review", "cv"]
-    assert (result.out_dir / "cv.pdf").exists() and (result.out_dir / "tailored.json").exists()
+    assert (result.out_dir / "Jane_Example_CV.pdf").exists() and (result.out_dir / "tailored.json").exists()
     record = json.loads((result.out_dir / "review.json").read_text())
     assert record["review"]["verdict"] == "revise" and record["final"]["gaps"] == ["Rust"]
     assert [s["step"] for s in record["steps"]] == ["research", "draft", "critique", "revise"]
@@ -242,7 +242,7 @@ def test_gives_up_when_repairs_keep_failing(data):
     client = Client(research=[text_reply("- note")], cvs=[bad, bad, bad], reviews=[READY])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
     assert not result.ok and "still failing" in result.error
-    assert result.pdf is None and not (result.out_dir / "cv.pdf").exists()
+    assert result.pdf is None and not list(result.out_dir.glob("*.pdf"))
     record = json.loads((result.out_dir / "review.json").read_text())
     assert any("COBOL" in p for p in record["problems"])
     assert len([s for s in record["steps"] if s["step"] == "repair"]) == 2

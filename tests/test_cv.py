@@ -171,3 +171,18 @@ def test_headline_must_be_an_allowed_option():
     assert "machine learning engineer" in render_tex(source, cv)
     cv["headline"] = "Chief AI Officer"
     assert any("headline" in str(p) for p in check_content(source, cv))
+
+
+def test_pdf_is_named_after_the_candidate():
+    from jobagent.cv.render import pdf_filename
+    assert pdf_filename(SOURCE) == "Jane_Example_CV.pdf"
+    assert pdf_filename({"name": "Zoë O'Brien-Smith"}) == "Zoe_O_Brien_Smith_CV.pdf"
+    assert pdf_filename({"name": ""}) == "CV.pdf"
+
+
+@needs_latex
+def test_rebuilding_replaces_an_old_cv_pdf(tmp_path):
+    (tmp_path / "cv.pdf").write_text("old")
+    pdf, _ = build(SOURCE, tailored(), tmp_path)
+    assert pdf.name == "Jane_Example_CV.pdf"
+    assert sorted(p.name for p in tmp_path.glob("*.pdf")) == ["Jane_Example_CV.pdf"]

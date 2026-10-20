@@ -8,7 +8,8 @@
     render     LaTeX to PDF, fitted to the page limit, then the PDF checks
 
 Each step is one request built in llm.py. Output goes to
-data/applications/<company>_<role>_<id>/: cv.pdf, cv.tex, tailored.json, review.json.
+data/applications/<company>_<role>_<id>/: <Your_Name>_CV.pdf, cv.tex, tailored.json,
+review.json.
 """
 from __future__ import annotations
 
