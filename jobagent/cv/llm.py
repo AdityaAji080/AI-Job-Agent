@@ -215,15 +215,16 @@ def usage_of(message) -> dict:
             "searches": field(server, "web_search_requests", 0) or 0}
 
 
-def cost(usages: list[dict]) -> float:
-    """Rough USD at standard (not batch) prices."""
+def cost(usages: list[dict], batch: bool = False) -> float:
+    """Rough USD. Batch requests pay half for tokens; web searches cost the same."""
     total = 0.0
+    token_share = 0.5 if batch else 1.0
     for u in usages:
         model = next((m for m in PRICES if str(u.get("model", "")).startswith(m)), DRAFT_MODEL)
         pin, pout = PRICES[model]
-        total += (u["input"] * pin + u["output"] * pout
-                  + u["cache_read"] * pin * CACHE_READ.get(model, 0.1)
-                  + u["cache_write"] * pin * 1.25) / 1e6
+        total += token_share * (u["input"] * pin + u["output"] * pout
+                                + u["cache_read"] * pin * CACHE_READ.get(model, 0.1)
+                                + u["cache_write"] * pin * 1.25) / 1e6
         total += u["searches"] * SEARCH_PRICE
     return total
 

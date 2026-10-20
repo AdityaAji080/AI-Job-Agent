@@ -2,6 +2,8 @@
 
     python -m jobagent.cv tailor URL [URL ...]          # research, draft, review, render
     python -m jobagent.cv tailor URL --posting-file F    # when the job board can't be read
+    python -m jobagent.cv batch --max 40                 # every untailored job, newest first
+    python -m jobagent.cv apply-updates                  # write finished CV paths to jobs.csv
     python -m jobagent.cv baseline --out OUT_DIR         # your full CV, no model calls
     python -m jobagent.cv check TAILORED.json --out OUT_DIR
 
@@ -79,6 +81,25 @@ def _tailor(args, source) -> int:
     return 1 if failed else 0
 
 
+def _batch(args, source) -> int:
+    import anthropic
+
+    from . import batch
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Set ANTHROPIC_API_KEY first.", file=sys.stderr)
+        return 2
+    summary = batch.run(anthropic.Anthropic(), source, max_jobs=args.max,
+                        deadline_seconds=args.deadline_minutes * 60, poll_seconds=args.poll_seconds)
+    batch.write_step_summary(summary)
+    print(f"\nTailored {summary['tailored']}, failed {len(summary['failed'])}, "
+          f"skipped {summary['closed']} closed, {summary['missing_text']} without posting text, "
+          f"{summary['in_progress']} still in progress. ~${summary['cost_usd']:.2f} at batch prices.")
+    for company, role, error in summary["failed"]:
+        print(f"  failed: {company}, {role}: {error}")
+    return 0  # failures are recorded per job; they shouldn't fail the workflow
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", type=Path, default=config.CV_SOURCE_PATH)
@@ -90,6 +111,14 @@ def main() -> int:
     t.add_argument("--company", default="", help="when the URL isn't in the tracker")
     t.add_argument("--role", default="", help="when the URL isn't in the tracker")
 
+    b = sub.add_parser("batch", help="tailor untailored tracker jobs through the Batch API")
+    b.add_argument("--max", type=int, default=int(os.environ.get("MAX_TAILOR", "40")),
+                   help="jobs to take on this run (default: MAX_TAILOR or 40)")
+    b.add_argument("--deadline-minutes", type=float, default=300,
+                   help="stop waiting after this long; a running batch is collected next time")
+    b.add_argument("--poll-seconds", type=float, default=60)
+    sub.add_parser("apply-updates", help="write finished CV paths into jobs.csv")
+
     for name in ("baseline", "check"):
         p = sub.add_parser(name, help="render without model calls")
         if name == "check":
@@ -99,10 +128,16 @@ def main() -> int:
                        help="overrides layout.max_pages in the source")
 
     args = ap.parse_args()
+    if args.cmd == "apply-updates":
+        from .batch import apply_updates
+        print(f"Recorded {apply_updates()} result(s) in jobs.csv.")
+        return 0
     if not args.source.exists():
         print(f"Missing {args.source}. Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
         return 2
     source = load_source(args.source)
+    if args.cmd == "batch":
+        return _batch(args, source)
     return _tailor(args, source) if args.cmd == "tailor" else _render(args, source)
 
 
