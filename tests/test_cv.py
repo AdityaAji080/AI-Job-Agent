@@ -125,9 +125,9 @@ def test_build_baseline(tmp_path):
 @needs_latex
 def test_build_fits_by_dropping_bullets(tmp_path):
     cv = tailored()
-    for i in range(30):  # far too much text for one page
-        cv["experience"][0]["bullets"].append(
-            {"from": "pricing", "text": f"Built an event-driven pricing service handling 2K requests/second ({i})."})
+    long = "Built an event-driven pricing service handling 2K requests/second, " * 3
+    for i in range(40):  # roughly three pages of text, whatever the layout
+        cv["experience"][0]["bullets"].append({"from": "pricing", "text": f"{long}({i})."})
     pdf, problems = build(SOURCE, cv, tmp_path, max_pages=1)
     assert pdf is not None
     assert any(p.where == "fit" for p in problems)
