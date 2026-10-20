@@ -19,6 +19,11 @@ from . import content, prompts
 DRAFT_MODEL = os.environ.get("TAILOR_DRAFT_MODEL", "claude-opus-5-5")
 REVIEW_MODEL = os.environ.get("TAILOR_REVIEW_MODEL", "claude-sonnet-5-5")
 RESEARCH_SEARCHES = 3
+# Ceilings, not targets: only tokens actually written are billed. A review of a long
+# posting overran 3,000 in the first live run.
+DRAFT_MAX_TOKENS = 8000
+REVIEW_MAX_TOKENS = 8000
+RESEARCH_MAX_TOKENS = 3000
 POSTING_CHARS = 12000
 
 # USD per million tokens, for the cost estimate printed after a run (not billing).
@@ -103,7 +108,7 @@ def _cv_json(cv: dict) -> str:
 
 def draft_request(source: dict, posting: dict) -> dict:
     return {
-        "model": DRAFT_MODEL, "max_tokens": 4096,
+        "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
         "system": _system(prompts.DRAFTER, source),
         "output_config": _json_output(CV_SCHEMA),
         "messages": [{"role": "user", "content": _posting_block(posting)}],
@@ -113,7 +118,7 @@ def draft_request(source: dict, posting: dict) -> dict:
 def research_request(posting: dict) -> dict:
     excerpt = posting["text"][:2000]
     return {
-        "model": REVIEW_MODEL, "max_tokens": 2000,
+        "model": REVIEW_MODEL, "max_tokens": RESEARCH_MAX_TOKENS,
         "system": prompts.RESEARCH.format(max_searches=RESEARCH_SEARCHES),
         "tools": [WEB_SEARCH],
         "messages": [{"role": "user", "content":
@@ -128,7 +133,7 @@ def critique_request(source: dict, posting: dict, cv: dict, notes: str = "") -> 
         parts.append(f"<company_research>\n{notes}\n</company_research>")
     parts.append(f"<draft_cv>\n{_cv_json(cv)}\n</draft_cv>")
     return {
-        "model": REVIEW_MODEL, "max_tokens": 3000,
+        "model": REVIEW_MODEL, "max_tokens": REVIEW_MAX_TOKENS,
         "system": _system(prompts.CRITIC, source),
         "output_config": _json_output(REVIEW_SCHEMA),
         "messages": [{"role": "user", "content": "\n\n".join(parts)}],
@@ -137,7 +142,7 @@ def critique_request(source: dict, posting: dict, cv: dict, notes: str = "") -> 
 
 def revise_request(source: dict, posting: dict, cv: dict, review: dict) -> dict:
     return {
-        "model": DRAFT_MODEL, "max_tokens": 4096,
+        "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
         "system": _system(prompts.DRAFTER, source),
         "output_config": _json_output(CV_SCHEMA),
         "messages": [{"role": "user", "content": "\n\n".join([
@@ -151,7 +156,7 @@ def revise_request(source: dict, posting: dict, cv: dict, review: dict) -> dict:
 def repair_request(source: dict, posting: dict, cv: dict, problems: list) -> dict:
     listed = "\n".join(f"- {p.where}: {p.message}" for p in problems)
     return {
-        "model": DRAFT_MODEL, "max_tokens": 4096,
+        "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
         "system": _system(prompts.DRAFTER, source),
         "output_config": _json_output(CV_SCHEMA),
         "messages": [{"role": "user", "content": "\n\n".join([

@@ -73,6 +73,9 @@ applicant's tailored CV before it is sent. You did not write it.
 Suggestions must stay inside the source: never suggest adding experience the person
 doesn't have. Gaps the source can't fill are not the CV's job.
 
+Keep it focused: at most 6 items in each list, the most important first, each a sentence
+or two. A long list of minor points buries the ones that matter.
+
 Set `verdict` to "ready" only if you would send it as it is. Reply with the review as
 JSON in the required shape; use an empty string or list where a field doesn't apply.
 
