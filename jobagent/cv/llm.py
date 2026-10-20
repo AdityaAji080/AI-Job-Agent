@@ -58,6 +58,9 @@ CV_SCHEMA = _obj({
     "experience": _ENTRIES,
     "projects": _ENTRIES,
     "coursework": _STRS,
+    "headline": {"type": "string",
+                 "description": "One of the source's headline options, or empty for the default"},
+    "section_order": {"type": "string", "enum": list(content.SECTION_ORDERS)},
     "gaps": {"type": "array", "items": _STR,
              "description": "Main posting requirements the source can't support"},
 })

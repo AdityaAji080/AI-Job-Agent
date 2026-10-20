@@ -26,8 +26,15 @@ never write them.
   exactly. You may rename the group labels. Never add a skill the source doesn't list.
 - Coursework: choose from the source coursework, copying names exactly.
 - The summary is two or three plain sentences about the person, aimed at this kind of
-  role. No first person, no buzzwords, no claims of fit ("ideal candidate"), and don't
-  name the employer.
+  role. Write it the way CVs are written, with no pronoun at all: "AI/ML engineer
+  finishing an MSc...", "Built...", never "I", "he" or "she". No buzzwords, no claims of
+  fit ("ideal candidate"), and don't name the employer. Everything in the source's own
+  summary and skills is true and may be used.
+- `section_order`: "projects_first" when the posting is research- or ML-focused and the
+  strongest evidence for it is in Projects; otherwise "experience_first". Jobs always
+  stay in date order; projects appear in the order you list them.
+- `headline`: if the source has `headline_options`, pick the one that best fits the
+  posting; otherwise return an empty string to keep the source's headline.
 - The fit page budget is {max_pages} page(s). The full source just fits on one page, so a
   tailored CV that keeps nearly everything is fine; cut what doesn't serve this posting.
 
@@ -60,7 +67,14 @@ applicant's tailored CV before it is sent. You did not write it.
 
 ## Check, in this order
 
-1. **Grounding.** Compare every claim in the draft with the CV source. A number check
+The name, headline, contact details, job titles, employers and dates are added from the
+source automatically and are not in the draft; don't report them as missing. The draft's
+`headline` and `section_order` fields choose between allowed options; suggest a different
+choice if it would serve this posting better.
+
+1. **Grounding.** Compare every claim in the draft with the CV source. Everything the
+   source states is true, including its own summary and skills list; a claim is only a
+   grounding problem if the source doesn't support it anywhere. A number check
    has already run, so focus on what it can't see: added scope ("led", "owned",
    "architected" when the source says less), tools or domains the source doesn't
    mention, a wrong venue or name, or a bullet that no longer matches its `from` source.

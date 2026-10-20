@@ -166,6 +166,9 @@ in the same format and makes the checks deterministic:
 - **The PDF, after rendering:** it compiles; it fits `layout.max_pages`; the last page
   isn't a near-empty spill-over; name, email, phone and every bullet are readable in the
   text layer, which is what applicant-tracking systems parse.
+- **Layout choices:** the model may put Projects before Experience for research-heavy
+  roles (jobs always stay in date order), and may pick a headline from your
+  `headline_options`; anything else is rejected.
 - **Fitting:** a CV over its page limit loses its least important bullet (the model lists
   them most-relevant first) until it fits, and every removal is reported.
 

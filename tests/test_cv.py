@@ -132,3 +132,42 @@ def test_build_fits_by_dropping_bullets(tmp_path):
     assert pdf is not None
     assert any(p.where == "fit" for p in problems)
     assert not any(p.where == "layout" and "pages" in p.message for p in problems)
+
+
+def test_section_order_and_project_order():
+    cv = tailored()
+    cv["projects"] = [{"id": "thesis", "bullets": cv["projects"][0]["bullets"]}]
+    tex = render_tex(SOURCE, cv)
+    assert tex.index("\\section{Experience}") < tex.index("\\section{Projects}")
+    cv["section_order"] = "projects_first"
+    tex = render_tex(SOURCE, cv)
+    assert tex.index("\\section{Projects}") < tex.index("\\section{Experience}")
+    cv["section_order"] = "skills_first"
+    assert any("section_order" in e for e in errors(cv))
+
+
+def test_projects_follow_the_models_order_but_jobs_stay_chronological():
+    source = copy.deepcopy(SOURCE)
+    source["projects"].append({"id": "side", "title": "Side Project", "venue": "", "dates": "2024",
+                               "bullets": [{"id": "x", "text": "Wrote a parser."}]})
+    source["experience"].append({"id": "older", "title": "Intern", "org": "Old Co", "location": "",
+                                 "dates": "2020", "bullets": [{"id": "y", "text": "Fixed bugs."}]})
+    cv = baseline(source)
+    cv["projects"].reverse()
+    cv["experience"].reverse()
+    tex = render_tex(source, cv)
+    assert tex.index("Side Project") < tex.index("Uncertainty Estimates")   # model's order
+    assert tex.index("Example Logistics") < tex.index("Old Co")             # source order
+
+
+def test_headline_must_be_an_allowed_option():
+    source = copy.deepcopy(SOURCE)
+    source["headline"] = "Software Engineer"
+    source["headline_options"] = ["Machine Learning Engineer"]
+    cv = baseline(source)
+    assert "Software Engineer" in render_tex(source, cv)          # empty choice keeps the default
+    cv["headline"] = "machine learning engineer"
+    assert check_content(source, cv) == []
+    assert "machine learning engineer" in render_tex(source, cv)
+    cv["headline"] = "Chief AI Officer"
+    assert any("headline" in str(p) for p in check_content(source, cv))

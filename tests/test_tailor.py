@@ -285,3 +285,21 @@ def test_other_exceptions_are_not_swallowed(data):
 
     with pytest.raises(KeyError):
         tailor(Broken(), SOURCE, POSTING, log=lambda *_: None)
+
+
+@needs_latex
+def test_a_revision_that_drops_the_gaps_keeps_the_drafts(data):
+    revised = good_cv()
+    revised["gaps"] = []
+    client = Client(research=[text_reply("- note")], cvs=[good_cv(), revised], reviews=[REVISE])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert result.ok
+    assert json.loads((result.out_dir / "tailored.json").read_text())["gaps"] == ["Rust"]
+
+
+def test_prompts_rule_out_pronouns_and_trust_the_source_summary():
+    req = llm.draft_request(SOURCE, POSTING)["system"][0]["text"]
+    assert 'never "I", "he" or "she"' in req and "section_order" in req
+    critic = llm.critique_request(SOURCE, POSTING, good_cv())["system"][0]["text"]
+    assert "including its own summary and skills list" in critic
+    assert "don't report them as missing" in critic

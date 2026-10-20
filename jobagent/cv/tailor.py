@@ -130,7 +130,8 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
                 f"{len(review.get('emphasis') or [])} emphasis points)")
             gaps = cv.get("gaps", [])
             cv = llm.reply_json(step("revise", llm.revise_request(source, posting, cv, review))[-1])
-            cv.setdefault("gaps", gaps)
+            if not cv.get("gaps"):  # a revision tends to return an empty list
+                cv["gaps"] = gaps
 
         # 4. The automatic content checks, with up to two repair attempts.
         problems = check_content(source, cv)
@@ -141,7 +142,8 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
             log(f"  repairing {len(errors)} check failure(s), attempt {attempt + 1}")
             gaps = cv.get("gaps", [])
             cv = llm.reply_json(step("repair", llm.repair_request(source, posting, cv, errors))[-1])
-            cv.setdefault("gaps", gaps)
+            if not cv.get("gaps"):  # a revision tends to return an empty list
+                cv["gaps"] = gaps
             problems = check_content(source, cv)
         (out / "tailored.json").write_text(json.dumps(cv, indent=1, ensure_ascii=False), encoding="utf-8")
         record["final"] = cv

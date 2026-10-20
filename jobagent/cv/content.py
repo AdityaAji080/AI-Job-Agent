@@ -28,6 +28,8 @@ SUMMARY_MAX_WORDS = 60
 BULLET_MAX_WORDS = 42
 MAX_BULLETS_PER_ENTRY = 6
 MIN_BULLETS_PER_ROLE = 1
+# Research-heavy roles read better with the paper first; experience stays chronological.
+SECTION_ORDERS = ("experience_first", "projects_first")
 
 
 @dataclass
@@ -61,7 +63,14 @@ def baseline(source: dict) -> dict:
         "experience": entries("experience"),
         "projects": entries("projects"),
         "coursework": [c for ed in source.get("education") or [] for c in ed.get("coursework") or []],
+        "headline": "",
+        "section_order": "experience_first",
     }
+
+
+def headline_options(source: dict) -> list[str]:
+    """Headlines a tailored CV may use: the source's own, plus any headline_options."""
+    return [h for h in [source.get("headline", ""), *(source.get("headline_options") or [])] if h]
 
 
 # ---------------------------------------------------------------- the rules
@@ -149,6 +158,14 @@ def check_content(source: dict, cv: dict) -> list[Problem]:
                     err(f"{where}.{bid}", f"{_words(text)} words; limit {BULLET_MAX_WORDS}")
                 if not text.strip():
                     err(f"{where}.{bid}", "empty")
+
+    # Layout choices.
+    order = cv.get("section_order") or "experience_first"
+    if order not in SECTION_ORDERS:
+        err("section_order", f"'{order}' is not one of {', '.join(SECTION_ORDERS)}")
+    headline = (cv.get("headline") or "").strip()
+    if headline and _norm(headline) not in {_norm(h) for h in headline_options(source)}:
+        err("headline", f"'{headline}' is not the source headline or one of its headline_options")
 
     # Coursework: a subset, never invented.
     courses = {_norm(c) for ed in source.get("education") or [] for c in ed.get("coursework") or []}

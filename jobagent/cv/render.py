@@ -53,10 +53,11 @@ def context(source: dict, cv: dict) -> dict:
     c = source["contact"]
     contact = [c.get(k) for k in ("location", "phone", "email", "linkedin", "github") if c.get(k)]
 
-    def merged(section):
+    def merged(section, chronological):
         src = {e["id"]: e for e in source.get(section) or []}
-        order = [e["id"] for e in source.get(section) or []]  # always chronological
         chosen = {e["id"]: e for e in cv.get(section) or [] if e.get("id") in src}
+        # Jobs always run newest first, as in the source; projects follow the model's priority.
+        order = [e["id"] for e in source.get(section) or []] if chronological else list(chosen)
         return [{**{k: v for k, v in src[i].items() if k != "bullets"},
                  "bullets": [b["text"] for b in chosen[i]["bullets"]]}
                 for i in order if i in chosen]
@@ -64,10 +65,13 @@ def context(source: dict, cv: dict) -> dict:
     wanted = {c.lower() for c in cv.get("coursework") or []}
     education = [{**ed, "coursework": [c for c in ed.get("coursework") or [] if c.lower() in wanted]}
                  for ed in source.get("education") or []]
-    return {"name": source["name"], "headline": source.get("headline", ""),
+    first = "projects" if cv.get("section_order") == "projects_first" else "experience"
+    return {"name": source["name"],
+            "headline": (cv.get("headline") or "").strip() or source.get("headline", ""),
+            "sections": [first, "projects" if first == "experience" else "experience"],
             "contact_line": " | ".join(contact),
             "summary": cv["summary"], "skills": [g for g in cv["skills"] if g.get("items")],
-            "experience": merged("experience"), "projects": merged("projects"),
+            "experience": merged("experience", True), "projects": merged("projects", False),
             "education": education}
 
 

@@ -6,6 +6,9 @@
 # may only use numbers from its own source bullet or its entry's header.
 
 name: Jane Example
+headline: Software Engineer
+# Optional: other true headlines a tailored CV may use instead, picked per posting.
+headline_options: [Backend Engineer, Machine Learning Engineer]
 
 layout:
   max_pages: 1
