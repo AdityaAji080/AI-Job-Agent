@@ -1,11 +1,11 @@
 # job-agent
 
 A scheduled job-search agent that reads company job boards directly, has Claude judge
-each opening against a written set of criteria, and keeps a deduplicated tracker that
-grows a little every run.
+each opening against a written set of criteria, keeps a deduplicated tracker that grows a
+little every run, and writes a tailored, one-page CV for every job it records.
 
-It runs twice a week (Monday and Thursday) on GitHub Actions, costs a few dollars a run, and needs no
-machine left on.
+It runs twice a week (Monday and Thursday) on GitHub Actions and needs no machine left
+on. See [What it costs](#what-it-costs).
 
 ## Why it's built this way
 
@@ -35,6 +35,8 @@ flowchart LR
     D -->|harvest immediately| P
     S -.->|never judged twice| F
     J -.-> F
+    J --> T[CV tailoring<br/>Batch API]
+    T -->|one PDF per job| C[(applications/)]
 ```
 
 - **The harvester is deterministic code.** Greenhouse, Lever, Ashby, SmartRecruiters,
@@ -65,6 +67,11 @@ flowchart LR
 - **Roles on unsupported systems still count.** For employers on Darwinbox, Keka, iCIMS
   and the like, the agent falls back to search and fetch, with explicit verification
   rules (employer page over aggregator, never construct a URL).
+- **Every recorded job gets a CV, and the CV can't invent anything.** After each search, a
+  second job tailors a CV per new job: a model selects and rewords bullets from your CV
+  source, a second model reviews it as the hiring manager would, and deterministic checks
+  reject any number, skill or role the source doesn't contain. See
+  [Tailored CVs](#tailored-cvs).
 
 ## Project layout
 
@@ -76,13 +83,13 @@ jobagent/
   registry.py     boards.csv: every board found, with health and yield stats
   discover.py     finds a company's board from its name by probing each system's API
   store.py        jobs.csv and seen.csv, with URL normalisation for deduplication
-  agent.py        the Claude Agent SDK run and the six tools it gets
+  agent.py        the Claude Agent SDK run and the seven tools it gets
   prompt.py       the run instructions (profile-specific text comes from your files)
   seed.py         add boards by hand, or from an existing tracker
   postings.py     saved posting text, and re-reading a posting from its job board
   cv/             tailored CVs: model requests, batch runs, content rules, LaTeX template, PDF checks
-tests/            adapter parsing, URL detection, filters, dedup, and the agent's tools
-example/profile/  sample resume and criteria
+tests/            adapters, filters, dedup, the agent's tools, and CV tailoring (no network or API needed)
+example/profile/  sample resume, criteria and CV source
 ```
 
 ## Setup
@@ -95,6 +102,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    profile/resume.md      your resume, as plain text or markdown
    profile/criteria.md    what you want, and the skip list (see example/profile)
    profile/fit_keywords.txt  optional: weighted keywords that put the best-fitting jobs first
+   profile/cv_source.yaml    your CV as structured data, the only source tailored CVs use
+                             (see example/profile/cv_source.yaml)
    data/                  created on the first run
    ```
 
@@ -114,9 +123,16 @@ Personal files live in a **separate private repository**, so this one can be pub
 4. **Check the boards first.** Actions → Job search run → Run workflow → *harvest-only*.
    This reads every board and prints the pool without calling the model.
 
-5. **Run it for real** with *full*, or wait for the schedule. Results are committed to
+5. **Check your CV renders**, locally: `python -m jobagent.cv baseline --out out/` (see
+   [Running locally](#running-locally)). It builds your full CV from `cv_source.yaml` with
+   no model calls, so layout problems show up before any money is spent.
+
+6. **Run it for real** with *full*, or wait for the schedule. Results are committed to
    the data repo. Each run's summary appears on the Actions run page and in
-   `data/runs.csv`.
+   `data/runs.csv`; the CV tailoring job after it adds its own summary.
+
+7. **Optional: catch up on older jobs.** Actions → Tailor CVs → Run workflow with the URL
+   box empty tailors every tracked job that has no CV yet, at batch prices.
 
 ### Running locally
 
@@ -128,17 +144,32 @@ python -m jobagent.harvest https://jobs.lever.co/x # check one board
 python -m jobagent.seed URL --company "Name"       # add a board by hand
 python -m jobagent.discover "Sarvam AI" "Qure.ai"  # look for companies' boards
 ANTHROPIC_API_KEY=... python -m jobagent.agent     # full run
+python -m jobagent.cv baseline --out out/          # your full CV, no model calls
+ANTHROPIC_API_KEY=... python -m jobagent.cv tailor URL  # one tailored CV, standard prices
 python -m pytest -q
 ```
 
+CVs need `pdflatex`: on Ubuntu, `texlive-latex-base texlive-latex-recommended
+texlive-latex-extra texlive-fonts-recommended`; on Windows, MiKTeX with "install missing
+packages on-the-fly" turned on. On Windows PowerShell, set variables with
+`$env:JOBAGENT_HOME = "private"` instead of the `NAME=value` prefix.
+
 ## Tailored CVs
+
+Three ways to get one:
+
+- **Automatically:** after every scheduled search, for the jobs it just recorded (and any
+  older ones still without a CV, newest first, up to `MAX_TAILOR`).
+- **The backlog:** Actions → Tailor CVs → Run workflow with the URL box empty.
+- **Specific jobs now:** the same workflow with posting URLs pasted in (separated by
+  spaces), or locally:
 
 ```bash
 python -m jobagent.cv tailor URL [URL ...]           # needs ANTHROPIC_API_KEY
 python -m jobagent.cv tailor URL --posting-file F     # when the job board can't be read
 ```
 
-For each tracked posting this runs five steps, each a single API request:
+For each posting there are five steps, each a single API request:
 
 1. **Research** what the company does (Sonnet with up to 3 web searches). Notes are cached
    per company in `data/companies/` for 45 days, so the fourth Cohere role costs nothing here.
@@ -154,7 +185,7 @@ that don't have one yet (status `new`, not applied to), newest first, up to `MAX
 per run. It sends the same requests through the Batch API at half price, about $0.07–0.10
 per CV. Just before tailoring, each posting is re-read from its job board, and one that
 has closed is skipped. A batch still running when the job's time runs out is collected by
-the next run. To catch up on a backlog, run **Actions → Tailor CVs** with the URL box empty.
+the next run.
 
 The tracker's `cv` column then holds the PDF's path, `failed: <reason>` (details in that
 job's `review.json`), or `skipped: posting closed`. Clear the cell to have it tried again.
@@ -198,7 +229,7 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 
 | File | What it holds |
 | --- | --- |
-| `jobs.csv` | The tracker. `status` and `applied` are yours to edit; the agent only appends. |
+| `jobs.csv` | The tracker. `status` and `applied` are yours to edit. The agent only appends rows; CV tailoring fills in each row's `cv` column. A job is tailored while its `status` is `new` and `applied` isn't marked yes. |
 | `seen.csv` | Every posting judged, with the decision and the reason. Delete a row to have it judged again. |
 | `boards.csv` | The registry. Set `enabled` to `no` to stop reading a board. A board that fails three runs in a row disables itself. |
 | `runs.csv` | One line per run: boards read, pool size, recorded, skipped, cost. |
@@ -206,6 +237,20 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 | `applications/` | Tailored CVs, one folder per posting. |
 | `companies/` | Company research notes used by the CV reviewer, reused for 45 days. |
 | `tailor_state.json` | CV tailoring in progress between runs (normally empty). |
+
+## What it costs
+
+GitHub Actions is free here, because the workflows run in this public repository. The
+Anthropic API is the only cost:
+
+| | Per run | Per week (2 runs) |
+| --- | --- | --- |
+| Job search | up to `MAX_BUDGET_USD` ($5 by default) | up to $10 |
+| CV tailoring, Batch API | about $0.07–0.10 per CV, at most `MAX_TAILOR` (40) | up to about $6–8 |
+
+Tailoring a job by hand (the Tailor CVs workflow with URLs, or `tailor` locally) skips the
+batch discount: about $0.15 per CV. The `cost_usd` column of `data/runs.csv` has each
+search run's real cost, and each CV's `review.json` has its own.
 
 ## Adding a job-board system
 
@@ -223,3 +268,7 @@ test. `parse` takes the raw payload and is pure, so it can be tested without a n
 - The model's judgement is only as good as the criteria file. The skip list is the whole
   filter by design: recording a maybe costs one line to dismiss, a skipped match is
   invisible.
+- A tailored CV's automatic checks catch invented numbers, skills and roles, not every
+  overstated claim: "led" where the source says "supported" has no number to check. The
+  reviewer step is there for those, and caught every one in the test runs, but read a CV
+  before you send it.
