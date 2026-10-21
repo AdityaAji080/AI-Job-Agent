@@ -19,6 +19,7 @@ from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessag
 
 from . import config, filters, postings, store
 from .ats import detect_board, unsupported_system
+from .ats import mycareersfuture as mcf
 from .ats.base import make_client
 from .discover import probe
 from .harvest import Candidate, BoardResult, harvest, harvest_board, rank
@@ -182,6 +183,9 @@ def build_tools(run: Run):
             if not job.get("url") or not job.get("company") or not job.get("role"):
                 refused.append({"role": job.get("role"), "reason": "need company, role and url "
                                                                    "(or a valid candidate_id)"})
+                continue
+            if mcf.is_listing(job["url"]):
+                refused.append({"role": job.get("role"), "reason": mcf.NOT_A_ROUTE})
                 continue
             if len(jobs) >= room:
                 refused.append({"role": job.get("role"), "reason": "run limit reached"})

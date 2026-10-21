@@ -46,7 +46,11 @@ flowchart LR
 - **Singapore's national job portal covers the long tail.** Employers must advertise on
   MyCareersFuture for 14 days before applying for an Employment Pass, so a keyword search
   there reaches employers nobody would think to look for, early in each posting's life,
-  with a running count of applicants. Its employers also feed board discovery.
+  with a running count of applicants. Its employers also feed board discovery. Applying
+  through MyCareersFuture itself is open to Singapore citizens and PRs only, so its links are
+  never recorded: the agent finds the same role on the employer's own page and records that
+  instead (`add_jobs` refuses a MyCareersFuture link), or skips it when there is no route
+  to apply.
 - **A cheap prefilter removes the obvious.** Postings outside the target countries,
   non-engineering titles, and anything already tracked or judged never reach the model.
   It is deliberately loose: when unsure, it keeps the posting.

@@ -140,3 +140,45 @@ def test_emptied_files_start_fresh(tmp_path, monkeypatch):
     call(tools, "add_jobs", {"jobs": [{"candidate_id": next(iter(run.pool)), "why": "x"}]})
     assert config.JOBS_CSV.read_text(encoding="utf-8").startswith("date_added,company")
     assert len(store.read_jobs()) == 1
+
+
+def test_mcf_link_is_refused_and_employer_page_is_recorded(tmp_path, monkeypatch):
+    from jobagent import postings
+    from jobagent.ats import mycareersfuture as mcf
+    from jobagent.harvest import BoardResult, to_candidate
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    board = Board("mycareersfuture", "sg")
+    mcf_url = "https://www.mycareersfuture.gov.sg/job/engineering/ai-engineer-cfgi-0123456789abcdef0123456789abcdef"
+    p = Posting("mycareersfuture", "sg", "CFGI", "0123456789abcdef0123456789abcdef", "AI Engineer", mcf_url,
+                location="Singapore", compensation="SGD 7,000–9,000 / month", description="Build agents.")
+    run.absorb([BoardResult(board, ok=True, postings=1, candidates=[to_candidate(p, board)])])
+    cand = run.open_candidates("Singapore")[0]
+    assert "citizens and PRs" in cand.summary()["apply_via"]
+
+    # Recording it with the pool's own link is refused, and the candidate stays open.
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": cand.id, "why": "fits"}]})
+    assert res["added"] == 0 and res["rejected"][0]["reason"] == mcf.NOT_A_ROUTE
+    assert [c.id for c in run.open_candidates("Singapore")] == [cand.id]
+
+    # A hand-entered MyCareersFuture link is refused the same way.
+    res = call(tools, "add_jobs", {"jobs": [{"company": "CFGI", "role": "AI Engineer", "location": "Singapore",
+                                             "url": mcf_url, "why": "fits"}]})
+    assert res["added"] == 0 and res["rejected"][0]["reason"] == mcf.NOT_A_ROUTE
+
+    # With the employer's own page as url, it records, keeping the pool's other fields.
+    own = "https://careers.cfgi.com/jobs/ai-engineer-sg"
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": cand.id, "url": own, "why": "fits"}]})
+    assert res["added"] == 1
+    row = store.read_jobs()[0]
+    assert row["url"] == own and row["market"] == "Singapore" and row["compensation"].startswith("SGD 7,000")
+    saved = postings.load(own)
+    assert saved["text"] == "Build agents." and saved["source"] == "mycareersfuture:sg"
+    assert run.open_candidates("Singapore") == []
+
+
+def test_mcf_listing_urls_are_recognised():
+    from jobagent.ats import mycareersfuture as mcf
+    assert mcf.is_listing("https://www.MyCareersFuture.gov.sg/job/x")
+    assert mcf.is_listing("https://api.mycareersfuture.gov.sg/v2/jobs/abc")
+    assert not mcf.is_listing("https://jobs.lever.co/acme/1") and not mcf.is_listing("")

@@ -61,6 +61,8 @@ class Candidate:
             out["applicants_so_far"] = self.applicants
         if self.note:
             out["note"] = self.note
+        if self.board_key.startswith("mycareersfuture:"):
+            out["apply_via"] = "employer's own posting needed; MyCareersFuture is citizens and PRs only"
         if self.looks_stale:
             out["stale_check"] = f"posted >{config.STALE_DAYS} days ago and names no current/future year"
         if not self.description:
