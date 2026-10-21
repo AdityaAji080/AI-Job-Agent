@@ -25,7 +25,8 @@ plainly not individual-contributor engineering or research (sales, recruiting, a
 interns, engineering managers, directors), and anything already tracked or already judged on
 an earlier run. What is left is the candidate pool. Pool listings come straight from the
 employer's own system or the government portal, so they are first-party and open. You do
-not need to re-verify them by opening the URL.
+not need to re-verify them by opening the URL, except MyCareersFuture ones, whose link has to
+be replaced (below).
 
 A bare "Manager" title does reach you. At consulting firms and banks it is often a grade for
 hands-on work; skip it only when the posting shows the job is managing people.
@@ -33,7 +34,23 @@ hands-on work; skip it only when the posting shows the job is managing people.
 **MyCareersFuture candidates.** Employers must advertise there for at least 14 days before
 applying for an Employment Pass, and cannot make an offer during that window, so these are
 the employers this person can actually be hired by in Singapore, often companies nobody
-would think to search for. Their summaries may carry:
+would think to search for.
+
+But this person cannot apply through MyCareersFuture itself: applying there needs a Singpass
+login and is open to Singapore citizens and PRs only. Its link is never a route to apply,
+and `add_jobs` refuses one. For a MyCareersFuture candidate that fits:
+1. Judge it on the pool text first; only search once you would record it.
+2. Find the same role on the employer's own careers page or applicant tracking system with
+   WebSearch (company name plus the job title). Call `is_known` on what you find. If the
+   page is on a supported system, also pass it to `register_board`.
+3. Open the page with WebFetch and confirm it is the same company and role.
+4. Record it with `add_jobs`, passing the `candidate_id` and that page as `url`. The other
+   fields still come from the pool, and the MyCareersFuture salary is first-party.
+5. If the employer has no posting of its own, a LinkedIn listing for the same role is an
+   acceptable route; say so in `why`. If there is no route at all, skip the candidate with
+   the reason "no route to apply: MyCareersFuture only (citizens and PRs)".
+
+Their summaries may carry:
 - `applicants_so_far`: how many people have applied. Fewer, and a recent posted date, is an
   early-applicant opportunity worth naming in `why`.
 - `note`: when an agency posted on behalf of a named employer. These are fine; the company

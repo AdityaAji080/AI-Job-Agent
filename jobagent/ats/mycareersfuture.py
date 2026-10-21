@@ -47,6 +47,19 @@ def parse_url(url: str) -> str | None:
     return None  # a search source, not a company board; never registered from a URL
 
 
+# Applying through MyCareersFuture needs a Singpass login and is open to Singapore
+# citizens and PRs only, so its listing is never a route to apply for this person.
+NOT_A_ROUTE = ("MyCareersFuture only takes applications from Singapore citizens and PRs, so its "
+               "link is no route to apply. Find this role on the employer's own careers page or "
+               "applicant tracking system (or a LinkedIn listing if that is all there is), open it, "
+               "and record it again with the same candidate_id and that page as url.")
+
+
+def is_listing(url: str) -> bool:
+    """True for a link to MyCareersFuture itself (the site or its API)."""
+    return "mycareersfuture.gov.sg" in (url or "").lower()
+
+
 _COMMON_SHORT = {"bank", "group", "labs", "lab", "tech", "data", "asia", "care", "life", "link", "mind",
                  "soft", "core", "edge", "wave", "home", "food", "auto", "city", "next", "health", "one"}
 
