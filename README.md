@@ -261,6 +261,22 @@ python -m jobagent.cv check tailored.json --out out/
 
 Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 
+## Archiving what you've applied to
+
+When you apply, put `yes` (or `y`, `x`, `done`) in that job's `applied` column and push.
+The next search run, before it searches, moves the job out of `jobs.csv`:
+
+- the row goes to `data/archive/applied.csv`, with the date it was archived and its folder;
+- the application folder (CV, cover letter, `review.json`) moves to
+  `data/archive/<company>_<role>_<id>/`, with the `cv` and `cover_letter` paths updated;
+- the posting text is copied into that folder as `posting.md`, because postings usually
+  disappear once a job closes, and it's what to reread before an interview.
+
+An archived job stays in `seen.csv`, so it is never recorded again, and its company and
+role count in the duplicate check, so a repost under a new URL isn't either. A CV still
+being tailored when its job is archived joins the archive folder on the next run. To
+archive straight away without a search: `python -m jobagent.archive`.
+
 ## The data files
 
 | File | What it holds |
@@ -271,6 +287,7 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 | `runs.csv` | One line per run: boards read, pool size, recorded, skipped, cost. |
 | `postings/` | The text of each recorded posting, saved when it was recorded. |
 | `applications/` | Tailored CVs and cover letters, one folder per posting. |
+| `archive/` | Jobs marked applied: `applied.csv` and one folder each with the CV, letter and posting. |
 | `companies/` | Company research notes used by the CV reviewer, reused for 45 days. |
 | `tailor_state.json` | CV tailoring in progress between runs (normally empty). |
 

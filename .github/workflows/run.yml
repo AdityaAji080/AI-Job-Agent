@@ -79,6 +79,8 @@ jobs:
             echo "Nothing new to save."
           else
             git commit -m "Job search run $(date -u +%Y-%m-%d)"
+            # Take in tracker edits pushed while the run was going (marking jobs applied).
+            git pull --rebase
             git push
           fi
 

@@ -32,7 +32,7 @@ import os
 import time
 from datetime import date
 
-from .. import config, postings, store
+from .. import archive, config, postings, store
 from . import letter as letters
 from . import llm
 from .content import check_content
@@ -42,7 +42,7 @@ from .tailor import MAX_REPAIRS, cached_notes, letter_column, out_dir_for, save_
 STATE_FILE = "tailor_state.json"
 # A tracker row is tailored when its status is still new and it hasn't been applied to.
 OPEN_STATUSES = {"", "new"}
-APPLIED = {"yes", "y", "true", "1", "x", "applied", "done"}
+APPLIED = archive.APPLIED  # one definition of "marked applied"
 PREPARE_CONCURRENCY = 6
 LETTER_STAGES = ("letter", "letter_review", "letter_revise", "letter_repair")
 

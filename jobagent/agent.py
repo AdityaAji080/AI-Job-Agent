@@ -17,7 +17,7 @@ from datetime import date
 from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock,
                               create_sdk_mcp_server, query, tool)
 
-from . import config, filters, postings, store
+from . import archive, config, filters, postings, store
 from .ats import detect_board, unsupported_system
 from .ats import mycareersfuture as mcf
 from .ats.base import make_client
@@ -50,8 +50,7 @@ class Run:
         A role on both a company's own board and MyCareersFuture is kept as the board
         version (fuller detail); a role already in the tracker is dropped.
         """
-        tracked = {store.role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
-                   for j in store.read_jobs()}
+        tracked = store.tracked_role_keys()
         for r in results:
             self.board_results.append(r)
             self.registry.record_check(r.board.key, ok=r.ok, status=r.error,
@@ -385,6 +384,16 @@ async def main() -> int:
         if not path.exists():
             print(f"Missing {path}. Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
             return 2
+
+    if not args.dry_run:
+        # Jobs marked applied leave the tracker for data/archive/ before anything else.
+        archived = archive.archive_applied()
+        for row in archived:
+            print(f"Archived (applied): {row.get('company')}: {row.get('role')}", flush=True)
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if archived and summary_path:
+            with open(summary_path, "a", encoding="utf-8") as f:
+                f.write(f"Archived {len(archived)} job(s) marked applied.\n\n")
 
     registry = Registry.load()
     run = Run(registry)
