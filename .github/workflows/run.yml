@@ -2,8 +2,9 @@ name: Job search run
 
 on:
   schedule:
-    # 01:17 UTC = 06:47 IST, Monday and Thursday.
-    - cron: "17 1 * * 1,4"
+    # 01:17 UTC = 06:47 IST, every day. Daily runs with a small quota reach postings
+    # within a day of going up, when applying early counts most.
+    - cron: "17 1 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -59,10 +60,10 @@ jobs:
         if: github.event.inputs.mode != 'harvest-only'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MAX_BUDGET_USD: ${{ vars.MAX_BUDGET_USD || '5.00' }}
-          MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '25' }}
-          MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '5' }}
-          MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '3' }}
+          MAX_BUDGET_USD: ${{ vars.MAX_BUDGET_USD || '2.00' }}
+          MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '6' }}
+          MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '1' }}
+          MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '2' }}
           JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
 

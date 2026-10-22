@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import Counter
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -47,6 +48,8 @@ class Candidate:
                "location": self.location, "market": self.market}
         if self.posted:
             out["posted"] = f"{self.posted} ({self.age_days}d ago)"
+            if self.age_days is not None and 0 <= self.age_days <= config.FRESH_DAYS:
+                out["fresh"] = True
         elif self.posted_note:
             out["posted"] = self.posted_note
         if self.compensation:
@@ -147,21 +150,45 @@ def _age(c: Candidate) -> int:
     return c.age_days if c.age_days is not None else 10_000
 
 
+FRESH, RECENT, OLD = 0, 1, 2
+_OLD_NOTE = re.compile(r"\d+\s*\+\s*days", re.I)  # Workday's "Posted 30+ Days Ago"
+
+
+def freshness(c: Candidate) -> int:
+    """FRESH (up to FRESH_DAYS old), RECENT, or OLD (past OLD_DAYS, or stale). A posting
+    with no date counts as RECENT, unless its board says it is old ("30+ days ago")."""
+    if c.looks_stale:
+        return OLD
+    if c.age_days is None:
+        return OLD if _OLD_NOTE.search(c.posted_note or "") else RECENT
+    if c.age_days <= config.FRESH_DAYS:
+        return FRESH
+    return RECENT if c.age_days <= config.OLD_DAYS else OLD
+
+
+def _by_fit(group: list[Candidate]) -> list[Candidate]:
+    return sorted(group, key=lambda c: (-(min(c.fit, 15) // 4), _age(c)))
+
+
 def rank(candidates: list[Candidate]) -> list[Candidate]:
-    """Market priority first, then not-stale before stale. Within each of those groups the
-    order alternates between the best fit to the profile and the freshest posting, so
-    strong keyword matches come early without burying fresh generic roles (a plain
-    "AI Engineer" or "Software Engineer") that the keywords don't describe."""
+    """Market priority first, then freshness: fresh postings, then recent, then old.
+
+    Fresh postings are ordered best fit to the profile first: they are all new, and
+    an early application is worth most there. Recent ones alternate between the best fit
+    and the freshest, so strong keyword matches come early without burying generic roles
+    (a plain "AI Engineer") that the keywords don't describe. Old ones go best fit first.
+    """
     groups: dict[tuple, list[Candidate]] = {}
     for c in candidates:
-        groups.setdefault((filters.market_rank(c.market), c.looks_stale), []).append(c)
+        groups.setdefault((filters.market_rank(c.market), freshness(c)), []).append(c)
     out: list[Candidate] = []
     for key in sorted(groups):
         group = groups[key]
-        by_fit = sorted(group, key=lambda c: (-(min(c.fit, 15) // 4), _age(c)))
-        by_fresh = sorted(group, key=_age)
+        if key[1] != RECENT:
+            out.extend(_by_fit(group))
+            continue
         seen: set[str] = set()
-        for pair in zip(by_fit, by_fresh):
+        for pair in zip(_by_fit(group), sorted(group, key=_age)):
             for c in pair:
                 if c.id not in seen:
                     seen.add(c.id)

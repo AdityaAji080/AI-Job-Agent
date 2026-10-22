@@ -182,3 +182,10 @@ def test_mcf_listing_urls_are_recognised():
     assert mcf.is_listing("https://www.MyCareersFuture.gov.sg/job/x")
     assert mcf.is_listing("https://api.mycareersfuture.gov.sg/v2/jobs/abc")
     assert not mcf.is_listing("https://jobs.lever.co/acme/1") and not mcf.is_listing("")
+
+
+def test_system_prompt_formats_with_freshness_settings():
+    from jobagent.prompt import SYSTEM_PROMPT
+    text = SYSTEM_PROMPT.format(today="2026-10-22", resume="r", criteria="c", share=2, max_us=1, max_new=6,
+                                max_company=2, fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS)
+    assert f"up to {config.FRESH_DAYS} days old" in text and "{" not in text

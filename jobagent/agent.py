@@ -395,6 +395,7 @@ async def main() -> int:
     system_prompt = SYSTEM_PROMPT.format(
         today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS, max_us=config.MAX_US_JOBS,
         max_company=config.MAX_PER_COMPANY,
+        fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
         share=max(1, int(config.MAX_NEW_JOBS * config.TOP_MARKET_SHARE)),
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))

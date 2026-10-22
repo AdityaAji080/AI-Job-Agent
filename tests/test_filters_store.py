@@ -137,13 +137,14 @@ def test_fit_score_and_ranking(tmp_path, monkeypatch):
 
     b = Board("lever", "x", "X")
     today = date.today()
-    fresh_weak = to_candidate(Posting("lever", "x", "X", "1", "Backend Engineer", "https://a/1",
-                                      location="Bengaluru", posted=today.isoformat()), b)
+    # Both fresh: the stronger match comes first even though it is a few days older.
+    fresher_weak = to_candidate(Posting("lever", "x", "X", "1", "Backend Engineer", "https://a/1",
+                                        location="Bengaluru", posted=today.isoformat()), b)
     older_strong = to_candidate(Posting("lever", "x", "X", "2", "Computer Vision Engineer", "https://a/2",
-                                        location="Bengaluru", posted=date(today.year, today.month, 1).isoformat()
-                                        if today.day > 1 else today.isoformat(),
+                                        location="Bengaluru",
+                                        posted=date.fromordinal(today.toordinal() - 5).isoformat(),
                                         description="C++ and PyTorch"), b)
-    assert [c.job_id if hasattr(c, "job_id") else c.id for c in rank([fresh_weak, older_strong])][0].endswith(":2")
+    assert rank([fresher_weak, older_strong])[0].id.endswith(":2")
     monkeypatch.setattr(filters, "_FIT_RULES", None)
 
 
@@ -165,9 +166,72 @@ def test_rank_alternates_fit_and_freshness(tmp_path, monkeypatch):
         posted = date.fromordinal(today - days_old).isoformat()
         return to_candidate(Posting("lever", "x", "X", str(i), title, f"https://a/{i}",
                                     location="Bengaluru", posted=posted), b)
+    # All in the recent tier (8-30 days): strong matches and fresher generic roles alternate.
     strong = [cand(i, "Computer Vision Engineer", 20 + i) for i in range(3)]
-    generic = [cand(10 + i, "AI Engineer", i) for i in range(3)]  # fresher, no keyword match
+    generic = [cand(10 + i, "AI Engineer", 9 + i) for i in range(3)]  # fresher, no keyword match
     order = [c.title for c in rank(strong + generic)]
     assert order[:4] == ["Computer Vision Engineer", "AI Engineer", "Computer Vision Engineer", "AI Engineer"]
     assert len(order) == 6
     monkeypatch.setattr(filters, "_FIT_RULES", None)
+
+
+def _ranked(tmp_path, monkeypatch, specs):
+    """specs: (id, title, days_old or None, posted_note). Returns ids in rank order."""
+    rules = tmp_path / "fit.txt"
+    rules.write_text("3 computer vision\n", encoding="utf-8")
+    monkeypatch.setattr(config, "FIT_KEYWORDS_PATH", rules)
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+    b = Board("lever", "x", "X")
+    today = date.today().toordinal()
+    cands = []
+    for i, title, days, note in specs:
+        posted = date.fromordinal(today - days).isoformat() if days is not None else ""
+        cands.append(to_candidate(Posting("lever", "x", "X", i, title, f"https://a/{i}", location="Bengaluru",
+                                          posted=posted, posted_note=note), b))
+    order = [c.id.rsplit(":", 1)[-1] for c in rank(cands)]
+    monkeypatch.setattr(filters, "_FIT_RULES", None)
+    return order, cands
+
+
+def test_fresh_postings_come_first_then_recent_then_old(tmp_path, monkeypatch):
+    order, _ = _ranked(tmp_path, monkeypatch, [
+        ("old_strong", "Computer Vision Engineer", 45, ""),
+        ("recent_strong", "Computer Vision Engineer", 12, ""),
+        ("fresh_generic", "AI Engineer", 6, ""),
+        ("fresh_strong", "Computer Vision Engineer", 2, ""),
+    ])
+    assert order == ["fresh_strong", "fresh_generic", "recent_strong", "old_strong"]
+
+
+def test_undated_postings_rank_as_recent_unless_the_board_says_old(tmp_path, monkeypatch):
+    from jobagent.harvest import OLD, RECENT, freshness
+    order, cands = _ranked(tmp_path, monkeypatch, [
+        ("workday_old", "AI Engineer", None, "30+ days ago"),
+        ("undated", "AI Engineer", None, ""),
+        ("old", "AI Engineer", 40, ""),
+        ("fresh", "AI Engineer", 1, ""),
+    ])
+    tiers = {c.id.rsplit(":", 1)[-1]: freshness(c) for c in cands}
+    assert tiers["undated"] == RECENT and tiers["workday_old"] == OLD
+    assert order[:2] == ["fresh", "undated"]
+
+
+def test_stale_postings_rank_with_the_old(tmp_path, monkeypatch):
+    from jobagent.harvest import OLD, freshness
+    _, cands = _ranked(tmp_path, monkeypatch, [("stale", "AI Engineer", 120, "")])
+    assert cands[0].looks_stale and freshness(cands[0]) == OLD
+
+
+def test_summary_marks_fresh_postings(tmp_path, monkeypatch):
+    _, cands = _ranked(tmp_path, monkeypatch, [("a", "AI Engineer", 3, ""), ("b", "AI Engineer", 10, "")])
+    assert cands[0].summary()["fresh"] is True and "fresh" not in cands[1].summary()
+
+
+def test_market_still_comes_before_freshness(tmp_path, monkeypatch):
+    b = Board("lever", "x", "X")
+    today = date.today()
+    us_fresh = to_candidate(Posting("lever", "x", "X", "us", "AI Engineer", "https://a/us",
+                                    location="Seattle, WA", posted=today.isoformat()), b)
+    india_old = to_candidate(Posting("lever", "x", "X", "in", "AI Engineer", "https://a/in", location="Pune",
+                                     posted=date.fromordinal(today.toordinal() - 40).isoformat()), b)
+    assert [c.market for c in rank([us_fresh, india_old])] == ["India", "United States"]

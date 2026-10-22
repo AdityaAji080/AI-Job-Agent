@@ -80,11 +80,17 @@ limited, and discovery in a top market is worth more than judging candidates in 
 ### Steps for a market
 
 **A. Judge its pool.** Call `get_candidates` for the market and page through with `offset`
-until it is exhausted. The list alternates between the best keyword matches to the profile
-(`matches_profile`) and the freshest postings, so work from the top. A generic role (a plain
-"AI Engineer" or "Software Engineer" with no special keywords) is as recordable as a
-specialised one when it fits the role shape; keywords only help decide what to look at
-first. A strong match about to pass the staleness limit should be decided this run.
+until it is exhausted. Work from the top: the list is ordered by freshness first.
+Postings up to {fresh_days} days old (marked `fresh`) come first, best keyword matches to
+the profile (`matches_profile`) first among them. Then postings up to {old_days} days old,
+alternating between the best matches and the freshest. Older postings come last.
+
+Freshness matters because this person applies within a day of a job being recorded, and
+early applicants are screened first. Slots are few, so when a fresh posting and an older
+one fit about equally well, record the fresh one. An older posting is still worth
+recording when it fits clearly better. A generic role (a plain "AI Engineer" or "Software
+Engineer" with no special keywords) is as recordable as a specialised one when it fits the
+role shape; keywords only help decide what to look at first.
 
 For each candidate, decide: record it, or skip it for a reason on the skip list.
 

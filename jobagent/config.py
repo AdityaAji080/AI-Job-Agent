@@ -27,18 +27,18 @@ BOARDS_CSV = DATA_DIR / "boards.csv"
 RUNS_CSV = DATA_DIR / "runs.csv"
 
 # --- Run limits -------------------------------------------------------------
-MAX_NEW_JOBS = int(os.environ.get("MAX_NEW_JOBS", "25"))
+MAX_NEW_JOBS = int(os.environ.get("MAX_NEW_JOBS", "6"))
 # US listings are plentiful and easy to verify, so they would crowd out the
 # markets that matter more. Cap them per run.
-MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "5"))
+MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "1"))
 # One large board (a university, a big employer) shouldn't fill a run on its own.
 # Roles past the cap stay in the pool for later runs.
-MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "3"))
+MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "2"))
 # India and Singapore share first priority. Neither may take more than this share of
 # the run's slots while the other still has candidates waiting; spare slots flow over.
 TOP_MARKETS = ("India", "Singapore")
 TOP_MARKET_SHARE = float(os.environ.get("TOP_MARKET_SHARE", "0.4"))
-MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "5.00"))
+MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "2.00"))
 MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
 
 # --- Harvester --------------------------------------------------------------
@@ -160,3 +160,8 @@ OTHER_PLACES = re.compile(
 )
 REMOTE = re.compile(r"remote|anywhere|distributed|work from home|\bwfh\b", re.I)
 STALE_DAYS = 90
+# Freshness tiers for ranking. Early applicants are screened first, so postings up to
+# FRESH_DAYS old are worked before anything else, and ones older than OLD_DAYS go last
+# (still judged: an old posting for a rare, well-matched role is worth recording).
+FRESH_DAYS = 7
+OLD_DAYS = 30

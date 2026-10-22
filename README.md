@@ -4,8 +4,8 @@ A scheduled job-search agent that reads company job boards directly, has Claude 
 each opening against a written set of criteria, keeps a deduplicated tracker that grows a
 little every run, and writes a tailored, one-page CV for every job it records.
 
-It runs twice a week (Monday and Thursday) on GitHub Actions and needs no machine left
-on. See [What it costs](#what-it-costs).
+It runs every morning on GitHub Actions, recording a handful of jobs a day with the freshest
+postings first, and needs no machine left on. See [What it costs](#what-it-costs).
 
 ## Why it's built this way
 
@@ -26,7 +26,7 @@ So the work is now split by what each part is good at:
 flowchart LR
     R[(boards.csv<br/>board registry)] --> H[Harvester<br/>plain Python]
     H -->|every posting, via each<br/>board's public JSON API| F[Prefilter<br/>market, title,<br/>already seen]
-    F --> P[Candidate pool<br/>ranked by market]
+    F --> P[Candidate pool<br/>ranked by market, then freshness]
     P --> A[Claude agent]
     A -->|record| J[(jobs.csv<br/>tracker)]
     A -->|skip, with reason| S[(seen.csv)]
@@ -66,7 +66,7 @@ flowchart LR
   use up the run's job slots, so it continues after they're full.
 - **No single source dominates.** India and Singapore are worked as equals, each limited
   to a share of the run while the other has candidates waiting; Canada follows, the US is
-  capped, and no company can take more than three slots in a run. The rest wait in the pool.
+  capped, and no company can take more than two slots in a run. The rest wait in the pool.
   A job listed both on a company's board and on MyCareersFuture is judged once.
 - **Roles on unsupported systems still count.** For employers on Darwinbox, Keka, iCIMS
   and the like, the agent falls back to search and fetch, with explicit verification
@@ -119,8 +119,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Secret `ANTHROPIC_API_KEY`: your key from console.anthropic.com
    - Secret `DATA_REPO_TOKEN`: the token from step 2
    - Variable `DATA_REPO`: `your-username/job-agent-data`
-   - Optional variables `MAX_BUDGET_USD` (default 5.00), `MAX_NEW_JOBS` (default 25),
-     `MAX_US_JOBS` (default 5), `MAX_PER_COMPANY` (default 3), `TOP_MARKET_SHARE`
+   - Optional variables `MAX_BUDGET_USD` (default 2.00), `MAX_NEW_JOBS` (default 6),
+     `MAX_US_JOBS` (default 1), `MAX_PER_COMPANY` (default 2), `TOP_MARKET_SHARE`
      (default 0.4), `JOBAGENT_MODEL` (default `sonnet`; set to `opus` for the larger model)
      and `MAX_TAILOR` (default 40: CVs tailored per scheduled run)
 
@@ -247,10 +247,13 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 GitHub Actions is free here, because the workflows run in this public repository. The
 Anthropic API is the only cost:
 
-| | Per run | Per week (2 runs) |
+| | Per run | Per week (7 runs) |
 | --- | --- | --- |
-| Job search | up to `MAX_BUDGET_USD` ($5 by default) | up to $10 |
-| CV tailoring, Batch API | about $0.07–0.10 per CV, at most `MAX_TAILOR` (40) | up to about $6–8 |
+| Job search | up to `MAX_BUDGET_USD` ($2 by default) | up to $14 |
+| CV tailoring, Batch API | about $0.07–0.10 per CV, one per job recorded (6 by default) | about $3–4 |
+
+Judging comes before discovery, so a tight budget trims discovery (finding new boards)
+first, and Canada's pool, which is judged after India and Singapore's discovery.
 
 Tailoring a job by hand (the Tailor CVs workflow with URLs, or `tailor` locally) skips the
 batch discount: about $0.15 per CV. The `cost_usd` column of `data/runs.csv` has each
