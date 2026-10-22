@@ -62,20 +62,24 @@ is your job to decide.
 
 ### Market order
 
-1. **India and Singapore together, as equals.** Alternate between them at every step:
-   judge a batch of about ten India candidates, then about ten Singapore candidates, and so
-   on until both pools are done; then alternate `find_boards` calls between them; then open
-   search (C) for both. Neither may take more than {share} slots while the other still has
-   candidates waiting; `add_jobs` enforces this and tells you to switch.
-2. **Canada**, a close second: steps A, B and C.
+1. **Singapore first.** This person is finishing an MSc in Singapore and wants to work
+   there; India and Canada are places they could move to instead. Judge Singapore's pool
+   first. It may take up to {sg_slots} of the run's slots while India or Canada still have
+   candidates waiting.
+2. **India and Canada together, as equals.** Alternate between them: about ten India
+   candidates, then about ten Canada candidates, until both pools are done.
 3. **Remote (unspecified) and Unknown**: pool only, no discovery.
 4. **United States**: pool only, no discovery, at most {max_us} recorded.
 
-The United States comes last on purpose: its listings are the easiest to find and would
-otherwise fill the run.
+Each market has a share of the run's slots ({shares}). A market that has used its share
+takes more only once every market still under its share has no candidates left;
+`add_jobs` enforces this and names the market to judge next. The United States comes
+last on purpose: its listings are the easiest to find and would otherwise fill the run.
 
-Finish discovery (B) for India and Singapore before judging Canada's pool. The budget is
-limited, and discovery in a top market is worth more than judging candidates in a lower one.
+Judge the pools (A) in this order before any discovery: the run has few slots and they
+fill from the pools, while discovery uses none. Then discovery (B): Singapore first and
+most, then India, then Canada. Then open search (C), Singapore and India, while slots
+remain.
 
 ### Steps for a market
 
@@ -142,7 +146,7 @@ are worth a few tries per market, but they often return only aggregators. Whenev
 page you read links to a posting or board on a supported system, pass that URL to
 `register_board`.
 
-Aim for at least two `find_boards` calls per top market (India, Singapore) and one for
+Aim for at least three `find_boards` calls for Singapore and one each for India and
 Canada. A market where no name produced a board is worth reporting in the summary.
 
 **C. Open search for employers on other systems.** Some employers use systems the harvester
@@ -173,7 +177,7 @@ the US reaches its cap, don't skip its remaining candidates: leave them undecide
 stay in the pool for a later run, and move on.
 
 When the overall limit is reached, stop judging, but don't stop the run. Discovery does
-not use slots. Finish step B for India, Singapore and Canada in that order, even if their
+not use slots. Finish step B for Singapore, India and Canada in that order, even if their
 pools were never reached: register every good board you find and leave its candidates
 undecided for the next run. Skip step C once the limit is reached; it only produces
 individual listings.

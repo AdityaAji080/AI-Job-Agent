@@ -65,6 +65,19 @@ CV_SCHEMA = _obj({
              "description": "Main posting requirements the source can't support"},
 })
 
+LETTER_DECISIONS = ("required", "invited", "not_needed")
+# The first draft also decides whether the application needs a cover letter, so the
+# decision costs no extra request. Revisions and repairs return the plain CV_SCHEMA.
+DRAFT_SCHEMA = {**CV_SCHEMA, "properties": {**CV_SCHEMA["properties"], "cover_letter": _obj({
+    "decision": {"type": "string", "enum": list(LETTER_DECISIONS)}, "reason": _STR})},
+    "required": [*CV_SCHEMA["required"], "cover_letter"]}
+
+LETTER_SCHEMA = _obj({
+    "greeting": _STR,
+    "paragraphs": {"type": "array", "items": _STR, "description": "The body, one string per paragraph"},
+    "closing": _STR,
+})
+
 REVIEW_SCHEMA = _obj({
     "verdict": {"type": "string", "enum": ["ready", "revise"]},
     "grounding": {"type": "array", "items": _obj({"where": _STR, "quote": _STR, "problem": _STR})},
@@ -106,14 +119,19 @@ def _posting_block(posting: dict) -> str:
 
 
 def _cv_json(cv: dict) -> str:
-    return json.dumps({k: v for k, v in cv.items() if k != "gaps"}, indent=1, ensure_ascii=False)
+    return json.dumps({k: v for k, v in cv.items() if k not in ("gaps", "cover_letter")},
+                      indent=1, ensure_ascii=False)
+
+
+def _json(data: dict) -> str:
+    return json.dumps(data, indent=1, ensure_ascii=False)
 
 
 def draft_request(source: dict, posting: dict) -> dict:
     return {
         "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
         "system": _system(prompts.DRAFTER, source),
-        "output_config": _json_output(CV_SCHEMA),
+        "output_config": _json_output(DRAFT_SCHEMA),
         "messages": [{"role": "user", "content": _posting_block(posting)}],
     }
 
@@ -244,3 +262,66 @@ def send(client, params: dict, max_continues: int = 3) -> tuple[list, list[dict]
         message = client.messages.create(**params)
         replies.append(message)
     return replies, [usage_of(m) for m in replies]
+
+
+# ---------------------------------------------------------------- cover letters
+
+def _letter_system(template: str, source: dict) -> list[dict]:
+    from . import letter
+    return _system(template, source, min_words=letter.MIN_WORDS, max_words=letter.MAX_WORDS)
+
+
+def _letter_context(posting: dict, cv: dict, notes: str) -> list[str]:
+    parts = [_posting_block(posting)]
+    if notes:
+        parts.append(f"<company_research>\n{notes}\n</company_research>")
+    parts.append(f"<tailored_cv>\n{_cv_json(cv)}\n</tailored_cv>")
+    return parts
+
+
+def letter_request(source: dict, posting: dict, cv: dict, notes: str = "", why: str = "") -> dict:
+    parts = _letter_context(posting, cv, notes)
+    if why:
+        parts.append(f"Why this application has a letter: {why}")
+    return {
+        "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
+        "system": _letter_system(prompts.LETTER_WRITER, source),
+        "output_config": _json_output(LETTER_SCHEMA),
+        "messages": [{"role": "user", "content": "\n\n".join(parts)}],
+    }
+
+
+def letter_critique_request(source: dict, posting: dict, cv: dict, letter: dict, notes: str = "") -> dict:
+    parts = _letter_context(posting, cv, notes) + [f"<cover_letter>\n{_json(letter)}\n</cover_letter>"]
+    return {
+        "model": REVIEW_MODEL, "max_tokens": REVIEW_MAX_TOKENS,
+        "system": _letter_system(prompts.LETTER_CRITIC, source),
+        "output_config": _json_output(REVIEW_SCHEMA),
+        "messages": [{"role": "user", "content": "\n\n".join(parts)}],
+    }
+
+
+def letter_revise_request(source: dict, posting: dict, cv: dict, letter: dict, review: dict,
+                          notes: str = "") -> dict:
+    parts = _letter_context(posting, cv, notes) + [
+        f"<cover_letter>\n{_json(letter)}\n</cover_letter>",
+        f"<review>\n{_json(review)}\n</review>", prompts.LETTER_REVISE]
+    return {
+        "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
+        "system": _letter_system(prompts.LETTER_WRITER, source),
+        "output_config": _json_output(LETTER_SCHEMA),
+        "messages": [{"role": "user", "content": "\n\n".join(parts)}],
+    }
+
+
+def letter_repair_request(source: dict, posting: dict, cv: dict, letter: dict, problems: list,
+                          notes: str = "") -> dict:
+    listed = "\n".join(f"- {p.where}: {p.message}" for p in problems)
+    parts = _letter_context(posting, cv, notes) + [
+        f"<cover_letter>\n{_json(letter)}\n</cover_letter>", prompts.LETTER_REPAIR.format(problems=listed)]
+    return {
+        "model": DRAFT_MODEL, "max_tokens": DRAFT_MAX_TOKENS,
+        "system": _letter_system(prompts.LETTER_WRITER, source),
+        "output_config": _json_output(LETTER_SCHEMA),
+        "messages": [{"role": "user", "content": "\n\n".join(parts)}],
+    }

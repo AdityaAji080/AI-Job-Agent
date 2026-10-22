@@ -178,8 +178,8 @@ def test_check_failures_are_repaired_then_given_up_on(data):
     assert [f[2] for f in summary["failed"]] == ["content checks still failing after repairs"]
     assert client.stages == [["draft"], ["critique"], ["repair"], ["repair"]]
     updates = batch.load_state()["tracker_updates"]
-    assert updates[hopeless].startswith("failed: content checks")
-    assert updates[fixable].endswith("/Jane_Example_CV.pdf")
+    assert updates[hopeless] == {"cv": "failed: content checks still failing after repairs"}
+    assert updates[fixable]["cv"].endswith("/Jane_Example_CV.pdf") and updates[fixable]["cover_letter"] == ""
 
 
 def test_an_errored_request_fails_only_its_job_and_expired_ones_wait(data):
@@ -283,3 +283,79 @@ def test_a_404_on_the_posting_itself_is_closed(monkeypatch):
     from jobagent.ats.base import BoardError
     check = _fake_board(monkeypatch, error=BoardError("not found (404) at https://..."))
     assert check("https://jobs.lever.co/acme/abc123")[0] == postings.CLOSED
+
+
+# ---------------------------------------------------------------- cover letters
+
+from tests.test_tailor import LETTER, WANTS  # noqa: E402
+
+
+def wants_letter_cv():
+    return good_cv(cover_letter=WANTS)
+
+
+@needs_latex
+def test_letters_follow_the_finished_cv_only_where_wanted(data):
+    save_notes("Acme", "- cached")
+    asks = track(1)
+    silent = track(2)
+    not_needed = {"decision": "not_needed", "reason": "no mention of one"}
+    client = Client({"draft": lambda u: wants_letter_cv() if u == asks else good_cv(cover_letter=not_needed),
+                     "critique": lambda u: READY, "letter": lambda u: LETTER,
+                     "letter_review": lambda u: READY})
+    summary = run(client)
+    assert summary["tailored"] == 2 and summary["letters"] == 1
+    assert client.stages == [["draft"], ["critique"], ["letter"], ["letter_review"]]
+    batch.apply_updates()
+    rows = {j["url"]: j for j in store.read_jobs()}
+    assert rows[asks]["cover_letter"].endswith("/Jane_Example_Cover_Letter.pdf")
+    assert (config.DATA_DIR / rows[asks]["cover_letter"]).exists()
+    assert rows[silent]["cover_letter"] == "not needed: no mention of one"
+    rec = json.loads((config.DATA_DIR / rows[asks]["cv"]).with_name("review.json").read_text())
+    assert rec["cover_letter"]["final"] == LETTER and "letter" in [s["step"] for s in rec["steps"]]
+
+
+@needs_latex
+def test_a_letter_api_error_or_failed_checks_leave_the_cv_alone(data):
+    save_notes("Acme", "- cached")
+    errored = track(1)
+    unfixable = track(2)
+    bad = {**LETTER, "paragraphs": LETTER["paragraphs"] + ["We grew revenue 99% in a year."]}
+    client = Client({"draft": lambda u: wants_letter_cv(), "critique": lambda u: READY,
+                     "letter": lambda u: {"type": "errored", "error": {"message": "overloaded"}}
+                     if u == errored else bad,
+                     "letter_review": lambda u: READY, "letter_repair": lambda u: bad})
+    summary = run(client)
+    assert summary["tailored"] == 2 and summary["letters"] == 0 and summary["failed"] == []
+    assert client.stages == [["draft"], ["critique"], ["letter"], ["letter_review"],
+                             ["letter_repair"], ["letter_repair"]]
+    updates = batch.load_state()["tracker_updates"]
+    assert all(u["cv"].endswith("/Jane_Example_CV.pdf") for u in updates.values())
+    assert "overloaded" in updates[errored]["cover_letter"]
+    assert updates[unfixable]["cover_letter"] == "failed: letter checks still failing after repairs"
+
+
+def test_apply_updates_reads_old_and_new_shapes(data):
+    old, new = track(1), track(2)
+    state = batch.load_state()
+    state["tracker_updates"] = {old: "applications/a/cv.pdf",
+                                new: {"cv": "applications/b/cv.pdf", "cover_letter": "not needed"}}
+    batch.save_state(state)
+    assert batch.apply_updates() == 2
+    rows = {j["url"]: j for j in store.read_jobs()}
+    assert (rows[old]["cv"], rows[old]["cover_letter"]) == ("applications/a/cv.pdf", "")
+    assert (rows[new]["cv"], rows[new]["cover_letter"]) == ("applications/b/cv.pdf", "not needed")
+
+
+@needs_latex
+def test_a_single_job_can_repair_twice_in_one_run(data):
+    """Two repairs in a row leave the stage name unchanged; that is progress, not an expired round."""
+    save_notes("Acme", "- cached")
+    only = track(1)
+    replies = [bad_cv(), good_cv()]
+    client = Client({"draft": lambda u: bad_cv(), "critique": lambda u: READY,
+                     "repair": lambda u: replies.pop(0)})
+    summary = run(client)
+    assert summary["tailored"] == 1 and summary["in_progress"] == 0
+    assert client.stages == [["draft"], ["critique"], ["repair"], ["repair"]]
+    assert batch.load_state()["tracker_updates"][only]["cv"].endswith("/Jane_Example_CV.pdf")

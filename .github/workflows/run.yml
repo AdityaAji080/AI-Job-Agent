@@ -64,6 +64,7 @@ jobs:
           MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '6' }}
           MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '1' }}
           MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '2' }}
+          MARKET_SHARES: ${{ vars.MARKET_SHARES || '' }}
           JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
 
@@ -78,6 +79,8 @@ jobs:
             echo "Nothing new to save."
           else
             git commit -m "Job search run $(date -u +%Y-%m-%d)"
+            # Take in tracker edits pushed while the run was going (marking jobs applied).
+            git pull --rebase
             git push
           fi
 

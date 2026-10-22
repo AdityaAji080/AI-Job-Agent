@@ -38,7 +38,11 @@ def json_reply(data, model=llm.DRAFT_MODEL):
 
 def kind_of(params):
     schema = ((params.get("output_config") or {}).get("format") or {}).get("schema")
-    return {id(llm.CV_SCHEMA): "cv", id(llm.REVIEW_SCHEMA): "review"}.get(id(schema), "research")
+    kind = {id(llm.CV_SCHEMA): "cv", id(llm.DRAFT_SCHEMA): "cv", id(llm.REVIEW_SCHEMA): "review",
+            id(llm.LETTER_SCHEMA): "letter"}.get(id(schema), "research")
+    if kind == "review" and "<cover_letter>" in params["messages"][0]["content"]:
+        return "letter_review"
+    return kind
 
 
 def text_reply(text, stop="end_turn", searches=0):
@@ -51,8 +55,9 @@ def text_reply(text, stop="end_turn", searches=0):
 class Client:
     """Replies in order to each kind of request; records every request it receives."""
 
-    def __init__(self, research=(), cvs=(), reviews=()):
-        self.queues = {"research": list(research), "cv": list(cvs), "review": list(reviews)}
+    def __init__(self, research=(), cvs=(), reviews=(), letters=(), letter_reviews=()):
+        self.queues = {"research": list(research), "cv": list(cvs), "review": list(reviews),
+                       "letter": list(letters), "letter_review": list(letter_reviews)}
         self.requests = []
         self.messages = self
 
@@ -135,7 +140,7 @@ def test_requests_keep_contact_details_out_and_cache_the_source():
     assert "Example Logistics" in system["text"]
     assert "jane@example.com" not in system["text"] and "555" not in system["text"]
     assert "tool_choice" not in req and "tools" not in req  # Opus/Sonnet 5.5 reject forced tools
-    assert req["output_config"]["format"]["schema"] is llm.CV_SCHEMA
+    assert req["output_config"]["format"]["schema"] is llm.DRAFT_SCHEMA
     assert "Ignore previous instructions" in req["messages"][0]["content"]  # as data, in <posting>
     assert req["messages"][0]["content"].startswith("<posting>")
 
@@ -169,7 +174,8 @@ def _walk(schema, path="$"):
         yield from _walk(schema["items"], f"{path}[]")
 
 
-@pytest.mark.parametrize("schema", [llm.CV_SCHEMA, llm.REVIEW_SCHEMA], ids=["cv", "review"])
+@pytest.mark.parametrize("schema", [llm.CV_SCHEMA, llm.REVIEW_SCHEMA, llm.DRAFT_SCHEMA, llm.LETTER_SCHEMA],
+                         ids=["cv", "review", "draft", "letter"])
 def test_schemas_follow_structured_output_rules(schema):
     banned = {"minimum", "maximum", "multipleOf", "minLength", "maxLength", "maxItems", "pattern"}
     for path, node in _walk(schema):
@@ -303,3 +309,121 @@ def test_prompts_rule_out_pronouns_and_trust_the_source_summary():
     critic = llm.critique_request(SOURCE, POSTING, good_cv())["system"][0]["text"]
     assert "including its own summary and skills list" in critic
     assert "don't report them as missing" in critic
+
+
+# ---------------------------------------------------------------- cover letters
+
+LETTER = {"greeting": "Dear Hiring Team,", "closing": "Kind regards,", "paragraphs": [
+    "Acme Robotics is building event-driven services for its fleet, and the posting's focus on "
+    "Kafka and reliable Python services is exactly the work I have been doing and want to do more of. "
+    "I would like to bring that experience to the team.",
+    "At Example Logistics I built an event-driven pricing service handling 2K requests a second and "
+    "migrated 14 batch jobs to Kafka streams, cutting data latency from hours to seconds. I also ran "
+    "the team's on-call rotation and wrote its incident runbooks, so I know what it takes to keep "
+    "services healthy once they ship.",
+    "Alongside that work I trained gradient-boosted and neural models on 3M historical deliveries and "
+    "improved calibration error by 40% over the production baseline, which taught me to measure a "
+    "model against the system it replaces before trusting it.",
+    "I would bring production discipline and careful measurement to Acme Robotics, and I would welcome "
+    "a conversation about the role."]}
+WANTS = {"decision": "required", "reason": "the posting asks for a cover letter"}
+
+
+def draft_with(decision):
+    cv = good_cv()
+    cv["cover_letter"] = decision
+    return cv
+
+
+def test_a_grounded_letter_passes_its_checks():
+    from jobagent.cv.letter import check_letter
+    assert [p for p in check_letter(SOURCE, LETTER, POSTING) if p.level == "error"] == []
+
+
+@pytest.mark.parametrize("change,where,message", [
+    (lambda l: l["paragraphs"].append("We cut costs by 75% at my last job."), "paragraphs.5", "'75'"),
+    (lambda l: l["paragraphs"].__setitem__(0, "I admire [Company] and its work."), "paragraphs.1", "placeholder"),
+    (lambda l: l.update(paragraphs=l["paragraphs"][:2]), "paragraphs", "2 paragraphs"),
+    (lambda l: l.update(paragraphs=["word " * 150] * 3), "paragraphs", "450 words"),
+    (lambda l: l.update(greeting=""), "greeting", "missing"),
+    (lambda l: l.update(closing=""), "closing", "missing"),
+])
+def test_letter_checks_catch_problems(change, where, message):
+    from jobagent.cv.letter import check_letter
+    letter = copy.deepcopy(LETTER)
+    change(letter)
+    errors = [p for p in check_letter(SOURCE, letter, POSTING) if p.level == "error"]
+    assert any(p.where == where and message in p.message for p in errors), errors
+
+
+def test_letter_numbers_may_come_from_the_posting_or_the_notes():
+    from jobagent.cv.letter import check_letter
+    letter = copy.deepcopy(LETTER)
+    letter["paragraphs"][0] += " Your fleet of 250 robots and your 2019 founding say a lot."
+    assert any("'250'" in p.message for p in check_letter(SOURCE, letter, POSTING))
+    posting = {**POSTING, "text": POSTING["text"] + " We run 250 robots."}
+    found = check_letter(SOURCE, letter, posting, notes="- founded in 2019 (https://acme.example)")
+    assert not [p for p in found if p.level == "error"]
+
+
+def test_stock_phrases_are_warned_about_not_blocked():
+    from jobagent.cv.letter import check_letter
+    letter = copy.deepcopy(LETTER)
+    letter["paragraphs"][3] = "I am passionate about robots and would be a great asset to Acme Robotics."
+    found = check_letter(SOURCE, letter, POSTING)
+    assert {p.level for p in found if "stock phrase" in p.message} == {"warn"}
+
+
+def test_letter_column(data):
+    from jobagent.cv.tailor import letter_column
+    pdf = config.DATA_DIR / "applications" / "x" / "Jane_Example_Cover_Letter.pdf"
+    assert letter_column(WANTS, pdf) == "applications/x/Jane_Example_Cover_Letter.pdf"
+    assert letter_column(WANTS, None, "letter checks still failing") == "failed: letter checks still failing"
+    assert letter_column({"decision": "not_needed", "reason": "no mention of one"}, None) == \
+        "not needed: no mention of one"
+    assert letter_column(None, None) == "" and letter_column({"decision": "not_needed"}, None, forced=True) == ""
+
+
+@needs_latex
+def test_tailor_writes_a_letter_when_the_posting_asks(data):
+    client = Client(research=[text_reply("- builds robots")], cvs=[draft_with(WANTS)],
+                    reviews=[READY], letters=[LETTER], letter_reviews=[READY])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert result.ok and result.letter_pdf.name == "Jane_Example_Cover_Letter.pdf"
+    assert result.letter_note.endswith("/Jane_Example_Cover_Letter.pdf")
+    assert client.kinds() == ["research", "cv", "review", "letter", "letter_review"]
+    # The letter is written on the finished CV, with the company notes and the reason.
+    content = client.requests[3]["messages"][0]["content"]
+    assert "<tailored_cv>" in content and "builds robots" in content and "asks for a cover letter" in content
+    assert "cover_letter" not in content.split("<tailored_cv>")[1]
+    record = json.loads((result.out_dir / "review.json").read_text())
+    assert record["cover_letter"]["decision"] == WANTS and record["cover_letter"]["error"] == ""
+    assert (result.out_dir / "cover_letter.json").exists()
+
+
+@needs_latex
+def test_no_letter_when_not_needed_unless_forced(data):
+    not_needed = {"decision": "not_needed", "reason": "no mention of a cover letter"}
+    client = Client(research=[text_reply("- x")], cvs=[draft_with(not_needed)], reviews=[READY])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert result.ok and result.letter_pdf is None and "letter" not in client.kinds()
+    assert result.letter_note == "not needed: no mention of a cover letter"
+
+    client = Client(cvs=[draft_with(not_needed)], reviews=[READY], letters=[LETTER], letter_reviews=[READY])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None, force_letter=True)
+    assert result.letter_pdf is not None and "requested by hand" in client.requests[2]["messages"][0]["content"]
+
+
+@needs_latex
+def test_a_failing_letter_never_costs_the_cv(data):
+    bad = copy.deepcopy(LETTER)
+    bad["paragraphs"].append("We grew revenue 99% in a year.")
+    revise = {**REVISE, "grounding": []}
+    client = Client(research=[text_reply("- x")], cvs=[draft_with(WANTS)], reviews=[READY],
+                    letters=[bad, bad, bad, bad], letter_reviews=[revise])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert result.ok and result.pdf.exists() and result.letter_pdf is None
+    assert result.letter_note == "failed: letter checks still failing after repairs"
+    # draft, review, revision, then two repairs
+    assert client.kinds().count("letter") == 4
+    assert not list(result.out_dir.glob("*Cover_Letter.pdf"))

@@ -5,18 +5,22 @@
 
 The steps are the same requests as `tailor` (llm.py), sent as batches at half price:
 
-    1. research (companies not yet cached) + draft
+    1. research (companies not yet cached) + draft, which also decides whether the
+       application needs a cover letter
     2. critique
     3. revise, for drafts the reviewer didn't pass
     4. repair, up to twice, for drafts failing the content checks
-    then the PDF is rendered here, as for a single job.
+    5. for jobs that need one: the cover letter's draft, review, revision and repairs,
+       on the finished CV
+    then the PDFs are rendered here, as for a single job. A letter that fails never holds
+    back the CV: the job finishes with its CV and the letter's error is recorded.
 
 Progress lives in data/tailor_state.json and is saved after every batch, so a run that
 reaches its time limit leaves its batch running and the next run collects it. Nothing
 is paid for twice.
 
-This module never edits jobs.csv. Finished CV paths (or "failed: ..." / "skipped: ...")
-wait in the state file until `apply-updates`, which the workflow runs right after pulling
+This module never edits jobs.csv. Finished CV and letter paths (or "failed: ...",
+"skipped: ..." / "not needed: ...") wait in the state file until `apply-updates`, which the workflow runs right after pulling
 the latest data, so tracker edits made during a long run are never overwritten.
 """
 from __future__ import annotations
@@ -28,17 +32,19 @@ import os
 import time
 from datetime import date
 
-from .. import config, postings, store
+from .. import archive, config, postings, store
+from . import letter as letters
 from . import llm
 from .content import check_content
 from .render import build
-from .tailor import MAX_REPAIRS, cached_notes, out_dir_for, save_notes
+from .tailor import MAX_REPAIRS, cached_notes, letter_column, out_dir_for, save_notes
 
 STATE_FILE = "tailor_state.json"
 # A tracker row is tailored when its status is still new and it hasn't been applied to.
 OPEN_STATUSES = {"", "new"}
-APPLIED = {"yes", "y", "true", "1", "x", "applied", "done"}
+APPLIED = archive.APPLIED  # one definition of "marked applied"
 PREPARE_CONCURRENCY = 6
+LETTER_STAGES = ("letter", "letter_review", "letter_revise", "letter_repair")
 
 
 # ---------------------------------------------------------------- state
@@ -69,7 +75,8 @@ def apply_updates() -> int:
     state = load_state()
     done = 0
     for url, value in list(state["tracker_updates"].items()):
-        store.update_job(url, cv=value)  # a row deleted meanwhile is simply skipped
+        fields = value if isinstance(value, dict) else {"cv": value}  # older state: the CV path alone
+        store.update_job(url, **fields)  # a row deleted meanwhile is simply skipped
         del state["tracker_updates"][url]
         done += 1
     save_state(state)
@@ -147,6 +154,7 @@ def build_requests(state: dict, source: dict) -> tuple[list[dict], dict]:
     requests, research = [], {}
     for pid, job in state["jobs"].items():
         stage, posting = job["stage"], _posting(job)
+        notes = cached_notes(job["company"]) or ""
         if stage == "draft":
             params = llm.draft_request(source, posting)
             if cached_notes(job["company"]) is None:
@@ -158,6 +166,19 @@ def build_requests(state: dict, source: dict) -> tuple[list[dict], dict]:
         elif stage == "repair":
             errors = [p for p in check_content(source, job["cv"]) if p.level == "error"]
             params = llm.repair_request(source, posting, job["cv"], errors)
+        elif stage == "letter":
+            decision = job.get("decision")
+            why = ((decision or {}).get("reason", "") if letters.wanted(decision) else "") or "requested by hand"
+            params = llm.letter_request(source, posting, job["cv"], notes, why)
+        elif stage == "letter_review":
+            params = llm.letter_critique_request(source, posting, job["cv"], job["letter"], notes)
+        elif stage == "letter_revise":
+            params = llm.letter_revise_request(source, posting, job["cv"], job["letter"],
+                                               job["letter_review"], notes)
+        elif stage == "letter_repair":
+            errors = [p for p in letters.check_letter(source, job["letter"], posting, notes)
+                      if p.level == "error"]
+            params = llm.letter_repair_request(source, posting, job["cv"], job["letter"], errors, notes)
         else:
             continue
         requests.append({"custom_id": f"{stage}-{pid}", "params": params})
@@ -197,17 +218,25 @@ def process_results(state: dict, entries, companies: dict, log) -> None:
         job = jobs.get(key)
         if job is None:
             continue
+        in_letter = kind in LETTER_STAGES
         if rtype != "succeeded":
-            job["stage"], job["error"] = "failed", f"API error: {llm.field(result, 'error')}"
+            if in_letter:  # the letter is lost, the CV is not
+                job["letter_error"], job["stage"] = f"API error: {llm.field(result, 'error')}", "render"
+            else:
+                job["stage"], job["error"] = "failed", f"API error: {llm.field(result, 'error')}"
             continue
         message = llm.field(result, "message")
         job["steps"].append({"step": kind, "usage": [llm.usage_of(message)]})
         try:
             data = llm.reply_json(message)
         except llm.TailorError as exc:
-            job["stage"], job["error"] = "failed", str(exc)
+            if in_letter:
+                job["letter_error"], job["stage"] = str(exc), "render"
+            else:
+                job["stage"], job["error"] = "failed", str(exc)
             continue
         if kind == "draft":
+            job["decision"] = data.pop("cover_letter", None)
             job["cv"], job["draft"], job["stage"] = data, data, "critique"
         elif kind == "critique":
             job["review"] = data
@@ -215,6 +244,14 @@ def process_results(state: dict, entries, companies: dict, log) -> None:
             job["stage"] = "check" if ready else "revise"
         elif kind in ("revise", "repair"):
             job["cv"], job["stage"] = _keep_gaps(job, data), "check"
+        elif kind == "letter":
+            job["letter"], job["letter_draft"], job["stage"] = data, data, "letter_review"
+        elif kind == "letter_review":
+            job["letter_review"] = data
+            ready = data.get("verdict") == "ready" and not data.get("grounding")
+            job["stage"] = "letter_check" if ready else "letter_revise"
+        elif kind in ("letter_revise", "letter_repair"):
+            job["letter"], job["stage"] = data, "letter_check"
 
 
 # ---------------------------------------------------------------- local steps
@@ -227,7 +264,15 @@ def _record(job: dict, problems: list, error: str = "") -> dict:
             "steps": job["steps"], "company_notes": cached_notes(job["company"]) or "",
             "draft": job.get("draft"), "review": job.get("review"), "final": job.get("cv"),
             "problems": [str(p) for p in problems], "error": error,
+            "cover_letter": {"decision": job.get("decision"), "forced": bool(job.get("force_letter")),
+                             "draft": job.get("letter_draft"), "review": job.get("letter_review"),
+                             "final": job.get("letter"), "problems": job.get("letter_problems", []),
+                             "error": job.get("letter_error", "")},
             "usage_total_usd_estimate": round(llm.cost(usages, batch=True), 4)}
+
+
+def _wants_letter(job: dict) -> bool:
+    return bool(job.get("force_letter")) or letters.wanted(job.get("decision"))
 
 
 def _write(out, name: str, data) -> None:
@@ -249,25 +294,54 @@ def advance_local(state: dict, source: dict, results: dict, log) -> None:
                     job["stage"] = "repair"
                     continue
                 job["stage"], job["error"] = "failed", "content checks still failing after repairs"
+            elif _wants_letter(job) and not job.get("letter") and not job.get("letter_error"):
+                job["stage"] = "letter"  # on the finished CV, so the two agree
+                continue
             else:
                 job["stage"] = "render"
+        if job["stage"] == "letter_check":
+            found = letters.check_letter(source, job["letter"], _posting(job),
+                                         cached_notes(job["company"]) or "")
+            job["letter_problems"] = [str(p) for p in found]
+            if any(p.level == "error" for p in found):
+                if job.get("letter_repairs", 0) < MAX_REPAIRS:
+                    job["letter_repairs"] = job.get("letter_repairs", 0) + 1
+                    job["stage"] = "letter_repair"
+                    continue
+                job["letter_error"] = "letter checks still failing after repairs"
+            job["stage"] = "render"
         if job["stage"] == "render":
+            if not problems:  # arrived here via the letter stages: record the CV's warnings too
+                problems = check_content(source, job["cv"])
             pdf, pdf_problems = build(source, job["cv"], out)
             problems += pdf_problems
             if pdf is None or any(p.level == "error" for p in problems):
                 job["stage"], job["error"] = "failed", "PDF checks failed"
             else:
+                letter_pdf = None
+                if job.get("letter") and not job.get("letter_error"):
+                    letter_pdf, found = letters.build_letter(source, job["letter"], _posting(job), out)
+                    job["letter_problems"] = job.get("letter_problems", []) + [str(p) for p in found]
+                    if letter_pdf is None:
+                        job["letter_error"] = "letter PDF checks failed"
+                    else:
+                        _write(out, "cover_letter.json", job["letter"])
                 _write(out, "tailored.json", job["cv"])
                 _write(out, "review.json", _record(job, problems))
-                state["tracker_updates"][job["url"]] = str(pdf.relative_to(config.DATA_DIR))
+                state["tracker_updates"][job["url"]] = {
+                    "cv": str(pdf.relative_to(config.DATA_DIR)),
+                    "cover_letter": letter_column(job.get("decision"), letter_pdf, job.get("letter_error", ""),
+                                                  forced=bool(job.get("force_letter")))}
                 results["tailored"].append(job)
+                if letter_pdf is not None:
+                    results.setdefault("letters", []).append(job)
                 del state["jobs"][pid]
                 continue
         if job["stage"] == "failed":
             if job.get("cv"):
                 _write(out, "tailored.json", job["cv"])
             _write(out, "review.json", _record(job, problems, job["error"]))
-            state["tracker_updates"][job["url"]] = f"failed: {job['error']}"[:200]
+            state["tracker_updates"][job["url"]] = {"cv": f"failed: {job['error']}"[:200]}
             results["failed"].append(job)
             del state["jobs"][pid]
 
@@ -318,7 +392,9 @@ def run(client, source: dict, *, max_jobs: int, deadline_seconds: float, poll_se
         for posting in ready:
             pid = postings.posting_id(posting["url"])
             state["jobs"][pid] = {**posting, "stage": "draft", "cv": None, "review": None,
-                                  "repairs": 0, "steps": [], "error": ""}
+                                  "repairs": 0, "steps": [], "error": "", "decision": None,
+                                  "letter": None, "letter_review": None, "letter_repairs": 0,
+                                  "letter_error": "", "letter_problems": []}
         save_state(state)
 
     previous = None
@@ -330,7 +406,9 @@ def run(client, source: dict, *, max_jobs: int, deadline_seconds: float, poll_se
         if time.monotonic() >= deadline:
             log("  time limit reached; the remaining jobs continue next run")
             break
-        progress = {pid: j["stage"] for pid, j in state["jobs"].items()}
+        # A repeated repair is progress too, so the attempt counts are part of the snapshot.
+        progress = {pid: (j["stage"], j.get("repairs", 0), j.get("letter_repairs", 0))
+                    for pid, j in state["jobs"].items()}
         if progress == previous:  # a whole round expired unanswered: try again next run
             log("  the last batch expired without answers; retrying next run")
             break
@@ -351,8 +429,8 @@ def run(client, source: dict, *, max_jobs: int, deadline_seconds: float, poll_se
 def _summary(state: dict, results: dict) -> dict:
     spent = sum(llm.cost([u for s in j["steps"] for u in s["usage"]], batch=True)
                 for j in results["tailored"] + results["failed"])
-    return {"tailored": len(results["tailored"]), "failed": [(j["company"], j["role"], j["error"])
-                                                             for j in results["failed"]],
+    return {"tailored": len(results["tailored"]), "letters": len(results.get("letters", [])),
+            "failed": [(j["company"], j["role"], j["error"]) for j in results["failed"]],
             "closed": results["closed"], "missing_text": results["missing_text"],
             "in_progress": len(state["jobs"]), "batch_running": bool(state["batch"]),
             "cost_usd": round(spent, 2)}
@@ -364,7 +442,8 @@ def write_step_summary(summary: dict) -> None:
     if not path:
         return
     lines = [f"## Tailored CVs, {date.today().isoformat()}", "",
-             f"Tailored **{summary['tailored']}**, failed {len(summary['failed'])}, "
+             f"Tailored **{summary['tailored']}** (with {summary.get('letters', 0)} cover letter(s)), "
+             f"failed {len(summary['failed'])}, "
              f"skipped {summary['closed']} closed posting(s). About ${summary['cost_usd']:.2f} "
              f"at batch prices.", ""]
     if summary["missing_text"]:

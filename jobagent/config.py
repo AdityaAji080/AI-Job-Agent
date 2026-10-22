@@ -34,10 +34,32 @@ MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "1"))
 # One large board (a university, a big employer) shouldn't fill a run on its own.
 # Roles past the cap stay in the pool for later runs.
 MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "2"))
-# India and Singapore share first priority. Neither may take more than this share of
-# the run's slots while the other still has candidates waiting; spare slots flow over.
-TOP_MARKETS = ("India", "Singapore")
-TOP_MARKET_SHARE = float(os.environ.get("TOP_MARKET_SHARE", "0.4"))
+# Each market's share of a run's slots. A market at its share may take more only once
+# every other market still under its share has no candidates left, so spare slots flow
+# over and none are wasted. Singapore first (where the MSc is), then India and Canada.
+# Override with MARKET_SHARES="Singapore=0.6,India=0.2,Canada=0.2".
+DEFAULT_MARKET_SHARES = {"Singapore": 0.6, "India": 0.2, "Canada": 0.2}
+
+
+def _parse_shares(text: str) -> dict[str, float]:
+    shares = {}
+    for part in (text or "").split(","):
+        name, _, value = part.partition("=")
+        try:
+            if name.strip() and float(value) > 0:
+                shares[name.strip()] = float(value)
+        except ValueError:
+            continue  # a malformed entry falls back to the defaults below
+    return shares or dict(DEFAULT_MARKET_SHARES)
+
+
+MARKET_SHARES = _parse_shares(os.environ.get("MARKET_SHARES", ""))
+
+
+def market_slots(max_jobs: int | None = None) -> dict[str, int]:
+    """Slots per shared market for a run: 5 jobs -> Singapore 3, India 1, Canada 1."""
+    n = MAX_NEW_JOBS if max_jobs is None else max_jobs
+    return {m: max(1, int(n * s + 0.5)) for m, s in MARKET_SHARES.items()}
 MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "2.00"))
 MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
 
@@ -106,22 +128,22 @@ TITLE_EXCLUDE = re.compile(
 )
 
 # --- Markets ------------------------------------------------------------------
-# Priority tiers: lower is worked first. India and Singapore share the top tier,
-# Canada is a close second, the US comes last (and is capped, above).
+# Priority tiers: lower is worked first. Singapore comes first, India and Canada share
+# the second tier, the US comes last (and is capped, above).
 MARKET_TIERS = {
-    "India": 1, "Singapore": 1,
-    "Canada": 2,
+    "Singapore": 1,
+    "India": 2, "Canada": 2,
     "Remote (unspecified)": 3, "Unknown": 3,
     "United States": 4,
 }
 # Detection order: for a multi-city listing, the first market that matches wins,
 # so this follows the priority tiers.
 MARKETS: list[tuple[str, re.Pattern]] = [
+    ("Singapore", re.compile(r"singapore", re.I)),
     ("India", re.compile(
         # "Little India" is a district of Singapore, not the country.
         r"(?<!little )\bindia\b|bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|noida|hyderabad|"
         r"pune|chennai|kochi|thiruvananthapuram|trivandrum|ahmedabad|kolkata", re.I)),
-    ("Singapore", re.compile(r"singapore", re.I)),
     ("Canada", re.compile(
         r"canada|toronto|vancouver|montr[eé]al|ottawa|waterloo|kitchener|calgary|edmonton|"
         r"halifax|winnipeg|qu[eé]bec|victoria, bc|, ?(on|bc|ab|qc|ns|mb)\b", re.I)),

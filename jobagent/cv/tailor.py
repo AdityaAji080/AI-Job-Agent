@@ -1,15 +1,20 @@
 """Tailor the CV for one posting: research, draft, review, revise, check, render.
 
     research   what the company does (Sonnet + web search; cached per company)
-    draft      a selection and rewording of the CV source (Opus)
+    draft      a selection and rewording of the CV source (Opus), and whether the
+               posting needs a cover letter
     critique   a hiring-manager review of the draft (Sonnet)
     revise     the draft again with the review (Opus), unless the review says "ready"
     repair     up to two more tries if the automatic content checks fail
+    letter     when needed (or forced): the cover letter's draft, review, revision and
+               repairs, the same way, on the finished CV. A failed letter never holds
+               back the CV.
     render     LaTeX to PDF, fitted to the page limit, then the PDF checks
 
 Each step is one request built in llm.py. Output goes to
 data/applications/<company>_<role>_<id>/: <Your_Name>_CV.pdf, cv.tex, tailored.json,
-review.json.
+review.json, and with a letter <Your_Name>_Cover_Letter.pdf, cover_letter.tex and
+cover_letter.json.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from datetime import date
 from pathlib import Path
 
 from .. import config, postings, store
+from . import letter as letters
 from . import llm
 from .content import Problem, check_content
 from .render import build
@@ -37,6 +43,8 @@ class Result:
     problems: list[Problem] = field(default_factory=list)
     usages: list[dict] = field(default_factory=list)
     error: str = ""
+    letter_pdf: Path | None = None
+    letter_note: str = ""  # what goes in the tracker's cover_letter column
 
     @property
     def cost(self) -> float:
@@ -75,9 +83,23 @@ def save_notes(company: str, notes: str) -> None:
                                 "notes": notes}, indent=1, ensure_ascii=False), encoding="utf-8")
 
 
+def letter_column(decision: dict | None, pdf: Path | None, error: str = "", forced: bool = False) -> str:
+    """The tracker's cover_letter cell: the PDF, why there is none, or why it failed."""
+    if pdf is not None:
+        return str(pdf.relative_to(config.DATA_DIR))
+    if error:
+        return f"failed: {error}"[:200]
+    if forced or letters.wanted(decision):
+        return ""
+    if not decision:
+        return ""
+    reason = " ".join((decision.get("reason") or "").split())
+    return f"not needed: {reason}"[:150] if reason else "not needed"
+
+
 # ---------------------------------------------------------------- the pipeline
 
-def tailor(client, source: dict, posting: dict, log=print) -> Result:
+def tailor(client, source: dict, posting: dict, log=print, force_letter: bool = False) -> Result:
     out = out_dir_for(posting)
     out.mkdir(parents=True, exist_ok=True)
     usages: list[dict] = []
@@ -119,7 +141,9 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
         # 2. Draft.
         log("  drafting")
         cv = llm.reply_json(step("draft", llm.draft_request(source, posting))[-1])
+        decision = cv.pop("cover_letter", None)
         record["draft"] = cv
+        record["cover_letter"] = {"decision": decision, "forced": force_letter}
 
         # 3. Review, and revise unless it's ready.
         log("  reviewing")
@@ -152,15 +176,31 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
             return finish(Result(False, out, problems=problems,
                                  error="content checks still failing after repairs"))
 
-        # 5. Render, fit, and check the PDF.
+        # 5. The cover letter, on the finished CV, when the posting needs one.
+        letter, letter_error = None, ""
+        if force_letter or letters.wanted(decision):
+            letter, letter_error = _write_letter(step, source, posting, cv, notes, decision, record, log)
+
+        # 6. Render, fit, and check the PDFs.
         log("  rendering")
         pdf, pdf_problems = build(source, cv, out)
         problems += pdf_problems
         # Fitting may have dropped bullets; keep the JSON in step with the PDF.
         (out / "tailored.json").write_text(json.dumps(cv, indent=1, ensure_ascii=False), encoding="utf-8")
         ok = pdf is not None and not any(p.level == "error" for p in problems)
+        letter_pdf = None
+        if ok and letter is not None and not letter_error:
+            letter_pdf, found = letters.build_letter(source, letter, posting, out)
+            record["cover_letter"]["problems"] = record["cover_letter"].get("problems", []) + [str(p) for p in found]
+            if letter_pdf is None:
+                letter_error = "letter PDF checks failed"
+            else:
+                (out / "cover_letter.json").write_text(json.dumps(letter, indent=1, ensure_ascii=False),
+                                                       encoding="utf-8")
+        record["cover_letter"]["error"] = letter_error
         return finish(Result(ok, out, pdf=pdf, problems=problems,
-                             error="" if ok else "PDF checks failed"))
+                             error="" if ok else "PDF checks failed", letter_pdf=letter_pdf,
+                             letter_note=letter_column(decision, letter_pdf, letter_error, force_letter)))
     except llm.TailorError as exc:
         return finish(Result(False, out, error=str(exc)))
     except Exception as exc:  # an API error: keep what was spent and the steps so far
@@ -169,8 +209,46 @@ def tailor(client, source: dict, posting: dict, log=print) -> Result:
         return finish(Result(False, out, error=f"API error: {exc}"))
 
 
+def _write_letter(step, source: dict, posting: dict, cv: dict, notes: str, decision: dict | None,
+                  record: dict, log) -> tuple[dict | None, str]:
+    """Draft, review, revise and check the letter. Returns (letter, error); never raises
+    for a bad reply, because a failed letter mustn't cost the CV."""
+    why = ((decision or {}).get("reason", "") if letters.wanted(decision) else "") or "requested by hand"
+    info = record["cover_letter"]
+    try:
+        log("  writing the cover letter")
+        letter = llm.reply_json(step("letter", llm.letter_request(source, posting, cv, notes, why))[-1])
+        info["draft"] = letter
+        review = llm.reply_json(step("letter_review", llm.letter_critique_request(
+            source, posting, cv, letter, notes))[-1])
+        info["review"] = review
+        if review.get("verdict") != "ready" or review.get("grounding"):
+            log("  revising the cover letter")
+            letter = llm.reply_json(step("letter_revise", llm.letter_revise_request(
+                source, posting, cv, letter, review, notes))[-1])
+        found = letters.check_letter(source, letter, posting, notes)
+        for attempt in range(MAX_REPAIRS):
+            errors = [p for p in found if p.level == "error"]
+            if not errors:
+                break
+            log(f"  repairing the cover letter ({len(errors)} check failure(s)), attempt {attempt + 1}")
+            letter = llm.reply_json(step("letter_repair", llm.letter_repair_request(
+                source, posting, cv, letter, errors, notes))[-1])
+            found = letters.check_letter(source, letter, posting, notes)
+        info["final"], info["problems"] = letter, [str(p) for p in found]
+        if any(p.level == "error" for p in found):
+            return None, "letter checks still failing after repairs"
+        return letter, ""
+    except llm.TailorError as exc:
+        return None, str(exc)
+    except Exception as exc:  # an API error during the letter costs only the letter
+        if type(exc).__module__.split(".")[0] != "anthropic":
+            raise
+        return None, f"API error: {exc}"
+
+
 def tailor_url(client, source: dict, url: str, *, posting_file: Path | None = None,
-               company: str = "", role: str = "", log=print) -> Result:
+               company: str = "", role: str = "", log=print, force_letter: bool = False) -> Result:
     """Look the job up in the tracker, get its posting text, tailor, and note the CV."""
     import asyncio
 
@@ -189,7 +267,8 @@ def tailor_url(client, source: dict, url: str, *, posting_file: Path | None = No
                             "to a text file and pass --posting-file.")
     posting["company"] = company or posting.get("company", "")
     posting["role"] = role or posting.get("role", "")
-    result = tailor(client, source, posting, log=log)
+    result = tailor(client, source, posting, log=log, force_letter=force_letter)
     if result.ok and result.pdf and row:
-        store.update_job(url, cv=str(result.pdf.relative_to(config.DATA_DIR)))
+        store.update_job(url, cv=str(result.pdf.relative_to(config.DATA_DIR)),
+                         cover_letter=result.letter_note)
     return result

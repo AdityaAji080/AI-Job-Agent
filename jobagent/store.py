@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlsplit
 from . import config
 
 COLUMNS = ["date_added", "company", "role", "location", "market", "posted", "deadline_or_start",
-           "compensation", "experience", "url", "why", "status", "applied", "cv"]
+           "compensation", "experience", "url", "why", "status", "applied", "cv", "cover_letter"]
 SEEN_COLUMNS = ["key", "decision", "reason", "company", "role", "date"]
 
 # Query parameters that identify a job (everything else, like utm_*, is noise).
@@ -122,6 +122,23 @@ def read_seen() -> list[dict]:
     return _read(config.SEEN_CSV)
 
 
+def archive_csv() -> Path:
+    """Jobs moved out of the tracker once applied to (see jobagent.archive)."""
+    return config.DATA_DIR / "archive" / "applied.csv"
+
+
+def read_archived() -> list[dict]:
+    path = archive_csv()
+    return _read(path) if path.exists() else []
+
+
+def tracked_role_keys() -> set[str]:
+    """company+role+market of every job in the tracker or the archive: a repost of one under
+    a new URL is the same job."""
+    return {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
+            for j in read_jobs() + read_archived()}
+
+
 def known_keys() -> set[str]:
     """Every posting already tracked or already judged; the harvester skips these."""
     return {job_key(j.get("url", "")) for j in read_jobs()} | {s["key"] for s in read_seen()}
@@ -131,9 +148,8 @@ def append_jobs(jobs: list[dict]) -> dict:
     """Add jobs, rejecting duplicates by URL and by company+role+location."""
     ensure_schema()
     existing = read_jobs()
-    keys = {job_key(j.get("url", "")) for j in existing}
-    roles = {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
-             for j in existing}
+    keys = {job_key(j.get("url", "")) for j in existing + read_archived()}
+    roles = tracked_role_keys()
     added, rejected = [], []
     for job in jobs:
         key = job_key(job.get("url", ""))

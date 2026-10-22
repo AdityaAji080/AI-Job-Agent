@@ -102,21 +102,41 @@ def _pool(run, board, specs):
     run.absorb([BoardResult(board, ok=True, postings=len(posts), candidates=[to_candidate(p, board) for p in posts])])
 
 
-def test_india_singapore_share_with_overflow(tmp_path, monkeypatch):
+def test_market_slots_follow_the_shares(monkeypatch):
+    assert config.market_slots(5) == {"Singapore": 3, "India": 1, "Canada": 1}
+    assert config._parse_shares("Singapore=0.5, India=0.5, bad, Canada=x") == {"Singapore": 0.5, "India": 0.5}
+    assert config._parse_shares("") == config.DEFAULT_MARKET_SHARES
+
+
+def test_singapore_takes_its_share_then_spare_slots_flow_over(tmp_path, monkeypatch):
     run, tools = setup_run(tmp_path, monkeypatch, n=0)
-    monkeypatch.setattr(config, "MAX_NEW_JOBS", 10)
-    monkeypatch.setattr(config, "TOP_MARKET_SHARE", 0.2)  # share = 2
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 5)  # Singapore 3, India 1, Canada 1
     monkeypatch.setattr(config, "MAX_PER_COMPANY", 10)
-    _pool(run, Board("lever", "in"), [(f"In{i}", "ML Engineer", "Bengaluru") for i in range(4)])
-    _pool(run, Board("lever", "sg"), [("Sg", "ML Engineer", "Singapore")])
+    _pool(run, Board("lever", "sg"), [(f"Sg{i}", "ML Engineer", "Singapore") for i in range(4)])
+    _pool(run, Board("lever", "in"), [(f"In{i}", "ML Engineer", "Bengaluru") for i in range(3)])
+    sg = [c.id for c in run.open_candidates("Singapore")]
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in sg]})
+    assert res["added"] == 3 and "judge India next" in res["rejected"][0]["reason"]
+    assert len(run.open_candidates("Singapore")) == 1  # the refused one stays for later
+    # India takes its one slot, then the spare one too: Singapore has used its share and
+    # Canada, still under its share, has no candidates.
     india = [c.id for c in run.open_candidates("India")]
     res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in india]})
-    assert res["added"] == 2 and "judge Singapore next" in res["rejected"][0]["reason"]
-    sg = run.open_candidates("Singapore")[0].id
-    call(tools, "add_jobs", {"jobs": [{"candidate_id": sg, "why": "x"}]})
-    # Singapore is exhausted, so India's spare candidates may now overflow its share.
-    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in india[2:]]})
-    assert res["added"] == 2
+    assert res["added"] == 2 and res["rejected"][0]["reason"] == "run limit reached"
+
+
+def test_an_under_share_market_waits_only_on_candidates_it_could_record(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 5)
+    monkeypatch.setattr(config, "MAX_PER_COMPANY", 1)
+    _pool(run, Board("lever", "sg"), [("Sg", "ML Engineer", "Singapore"), ("Sg", "AI Engineer", "Singapore")])
+    _pool(run, Board("lever", "in"), [(f"In{i}", "ML Engineer", "Bengaluru") for i in range(3)])
+    sg = [c.id for c in run.open_candidates("Singapore")]
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in sg]})
+    assert res["added"] == 1 and "already has 1 this run" in res["rejected"][0]["reason"]
+    # Singapore's last candidate is from a company at its cap, so India isn't held back.
+    india = [c.id for c in run.open_candidates("India")]
+    assert call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in india]})["added"] == 3
 
 
 def test_same_role_on_board_and_mcf_is_kept_once(tmp_path, monkeypatch):
@@ -186,6 +206,7 @@ def test_mcf_listing_urls_are_recognised():
 
 def test_system_prompt_formats_with_freshness_settings():
     from jobagent.prompt import SYSTEM_PROMPT
-    text = SYSTEM_PROMPT.format(today="2026-10-22", resume="r", criteria="c", share=2, max_us=1, max_new=6,
-                                max_company=2, fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS)
+    text = SYSTEM_PROMPT.format(today="2026-10-22", resume="r", criteria="c", max_us=1, max_new=5,
+                                max_company=2, fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
+                                sg_slots=3, shares="Singapore 3, India 1, Canada 1")
     assert f"up to {config.FRESH_DAYS} days old" in text and "{" not in text

@@ -13,7 +13,8 @@ from jobagent.harvest import prefilter, rank, to_candidate
     ("Sunnyvale, CA", "United States"), ("Remote - US (open to Canada)", "Canada"),
     ("London, UK", "Other"), ("Berlin / Remote", "Other"), ("London; Bengaluru", "India"),
     ("Remote", "Remote (unspecified)"), ("", "Unknown"), ("HQ", "Unknown"),
-    ("Toronto / Singapore", "Singapore"), ("Singapore / Bengaluru", "India"),
+    ("Toronto / Singapore", "Singapore"), ("Singapore / Bengaluru", "Singapore"),
+    ("Bengaluru / Singapore", "Singapore"), ("Bengaluru / Toronto", "India"),
     ("Singapore (D08 Little India, Farrer Park)", "Singapore"),
 ])
 def test_market_of(loc, market):
@@ -22,8 +23,8 @@ def test_market_of(loc, market):
 
 def test_market_priority():
     r = filters.market_rank
-    assert r("India") == r("Singapore") < r("Canada") < r("Unknown") < r("United States")
-    assert filters.MARKET_ORDER[:3] == ["India", "Singapore", "Canada"]
+    assert r("Singapore") < r("India") == r("Canada") < r("Unknown") < r("United States")
+    assert filters.MARKET_ORDER[:3] == ["Singapore", "India", "Canada"]
     assert filters.MARKET_ORDER[-1] == "United States"
 
 

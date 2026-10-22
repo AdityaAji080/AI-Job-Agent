@@ -1,7 +1,8 @@
 name: Tailor CVs
 
 # Run by hand: Actions -> Tailor CVs -> Run workflow.
-#   With URLs: tailors just those postings now, at standard prices (a few minutes).
+#   With URLs: tailors just those postings now, at standard prices (a few minutes). Tick
+#              "letter" for a cover letter even where the posting doesn't ask for one.
 #   Without:   works through every tracked job that has no CV yet, newest first, through
 #              the Batch API at half price (usually within the hour). Use it to catch up.
 # CVs are committed to the private data repository only. This repository is public, and
@@ -18,6 +19,10 @@ on:
         description: "Backlog only: most jobs to take on in this run"
         required: false
         default: "150"
+      letter:
+        description: "With URLs: write a cover letter even if the posting doesn't ask for one"
+        type: boolean
+        default: false
 
 # Shares the search run's group, so the two never push to the data repo at the same time.
 concurrency:
@@ -55,10 +60,15 @@ jobs:
           # inject shell commands.
           URLS: ${{ inputs.urls }}
           MAX: ${{ inputs.max }}
+          LETTER: ${{ inputs.letter }}
         run: |
           set -f  # no filename expansion of the URLs
           if [ -n "$URLS" ]; then
-            python -m jobagent.cv tailor $URLS
+            if [ "$LETTER" = "true" ]; then
+              python -m jobagent.cv tailor --letter $URLS
+            else
+              python -m jobagent.cv tailor $URLS
+            fi
           else
             python -m jobagent.cv batch --max "$MAX" --deadline-minutes 300
           fi
