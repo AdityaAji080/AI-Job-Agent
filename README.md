@@ -2,7 +2,8 @@
 
 A scheduled job-search agent that reads company job boards directly, has Claude judge
 each opening against a written set of criteria, keeps a deduplicated tracker that grows a
-little every run, and writes a tailored, one-page CV for every job it records.
+little every run, and writes a tailored, one-page CV for every job it records, plus a
+cover letter where the posting asks for one.
 
 It runs every morning on GitHub Actions, recording a handful of jobs a day with the freshest
 postings first, and needs no machine left on. See [What it costs](#what-it-costs).
@@ -64,8 +65,9 @@ flowchart LR
   they're a fallback). A confirmed board is registered and harvested on the spot and on every
   later run, so one discovered company is worth every role it ever posts. Discovery doesn't
   use up the run's job slots, so it continues after they're full.
-- **No single source dominates.** India and Singapore are worked as equals, each limited
-  to a share of the run while the other has candidates waiting; Canada follows, the US is
+- **No single source dominates.** Singapore comes first, then India and Canada as equals.
+  Each has a share of the run's slots (by default Singapore 60%, India and Canada 20% each:
+  3, 1 and 1 of 5) and takes more only once the others have no candidates left; the US is
   capped, and no company can take more than two slots in a run. The rest wait in the pool.
   A job listed both on a company's board and on MyCareersFuture is judged once.
 - **Roles on unsupported systems still count.** For employers on Darwinbox, Keka, iCIMS
@@ -74,7 +76,8 @@ flowchart LR
 - **Every recorded job gets a CV, and the CV can't invent anything.** After each search, a
   second job tailors a CV per new job: a model selects and rewords bullets from your CV
   source, a second model reviews it as the hiring manager would, and deterministic checks
-  reject any number, skill or role the source doesn't contain. See
+  reject any number, skill or role the source doesn't contain. Where the posting asks for
+  a cover letter, one is written the same way, on the finished CV. See
   [Tailored CVs](#tailored-cvs).
 
 ## Project layout
@@ -120,8 +123,9 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Secret `DATA_REPO_TOKEN`: the token from step 2
    - Variable `DATA_REPO`: `your-username/job-agent-data`
    - Optional variables `MAX_BUDGET_USD` (default 2.00), `MAX_NEW_JOBS` (default 6),
-     `MAX_US_JOBS` (default 1), `MAX_PER_COMPANY` (default 2), `TOP_MARKET_SHARE`
-     (default 0.4), `JOBAGENT_MODEL` (default `sonnet`; set to `opus` for the larger model)
+     `MAX_US_JOBS` (default 1), `MAX_PER_COMPANY` (default 2), `MARKET_SHARES` (default
+     `Singapore=0.6,India=0.2,Canada=0.2`), `JOBAGENT_MODEL` (default `sonnet`; set to
+     `opus` for the larger model)
      and `MAX_TAILOR` (default 40: CVs tailored per scheduled run)
 
 4. **Check the boards first.** Actions → Job search run → Run workflow → *harvest-only*.
@@ -171,13 +175,15 @@ Three ways to get one:
 ```bash
 python -m jobagent.cv tailor URL [URL ...]           # needs ANTHROPIC_API_KEY
 python -m jobagent.cv tailor URL --posting-file F     # when the job board can't be read
+python -m jobagent.cv tailor URL --letter             # a cover letter even if not asked for
 ```
 
 For each posting there are five steps, each a single API request:
 
 1. **Research** what the company does (Sonnet with up to 3 web searches). Notes are cached
    per company in `data/companies/` for 45 days, so the fourth Cohere role costs nothing here.
-2. **Draft** a tailored selection of your CV source (Opus).
+2. **Draft** a tailored selection of your CV source (Opus). The draft also decides whether
+   the application needs a cover letter (see [Cover letters](#cover-letters)).
 3. **Critique** it as the hiring manager would (Sonnet): claims the source doesn't support,
    requirements the source covers but the draft leaves out, emphasis.
 4. **Revise** with that review (Opus), skipped when the review says it's ready.
@@ -194,12 +200,38 @@ the next run.
 The tracker's `cv` column then holds the PDF's path, `failed: <reason>` (details in that
 job's `review.json`), or `skipped: posting closed`. Clear the cell to have it tried again.
 
+### Cover letters
+
+The CV's draft step decides, from the posting text alone, whether the application needs a
+letter: **required** (the posting asks for one), **invited** (it mentions one as optional,
+asks why you want the role or company, or asks you to apply by email to a named person),
+or **not needed** (no mention, or it asks you not to send one). Required and invited get
+a letter; the decision costs no extra request.
+
+The letter is written after the CV is final, so the two agree, in the same steps: a draft
+(Opus) from your CV source, the finished CV, the posting and the company notes; a
+hiring-manager review (Sonnet); a revision unless the review passes it; then checks, with
+up to two repairs. The checks reject a number that appears in none of your source, the
+posting or the company notes, a placeholder like `[Company]`, fewer than three or more than
+five paragraphs, or more than 380 words, and flag stock phrases. Your name, contact
+details, the date, the company and role, and the signature come from the source and the
+posting, never from the model.
+
+A letter that fails never holds back the CV. The tracker's `cover_letter` column holds the
+letter's path, `not needed: <reason>`, or `failed: <reason>`. A posting's text can't show
+an application form's optional "cover letter" field, so for those, run the Tailor CVs
+workflow with the job's URL and **letter** ticked (or `tailor URL --letter`). At batch
+prices a letter costs about $0.05–0.08.
+
 The posting text comes from `data/postings/`, which `add_jobs` fills as jobs are recorded;
 older tracker rows are re-read from their job board (`python -m jobagent.postings URL`).
 Output goes to `data/applications/<company>_<role>_<id>/`: the PDF (named after you, e.g.
 `Jane_Example_CV.pdf`, since that is what recruiters see), `tailored.json`, and
 `review.json` with every step, the review, any gaps the posting asks for that your CV can't
-support, and the token usage. The tracker's `cv` column points to the PDF.
+support, and the token usage. With a letter, the same folder holds
+`Jane_Example_Cover_Letter.pdf`, `cover_letter.tex` and `cover_letter.json`, and
+`review.json` records its decision, drafts, review and checks. The tracker's `cv` and
+`cover_letter` columns point to the PDFs.
 
 A tailored CV is a **selection and rewording** of `profile/cv_source.yaml`, never free
 text. A model returns which bullets to use, in what order and how to word them; the
@@ -233,12 +265,12 @@ Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.
 
 | File | What it holds |
 | --- | --- |
-| `jobs.csv` | The tracker. `status` and `applied` are yours to edit. The agent only appends rows; CV tailoring fills in each row's `cv` column. A job is tailored while its `status` is `new` and `applied` isn't marked yes. |
+| `jobs.csv` | The tracker. `status` and `applied` are yours to edit. The agent only appends rows; CV tailoring fills in each row's `cv` and `cover_letter` columns. A job is tailored while its `status` is `new` and `applied` isn't marked yes. |
 | `seen.csv` | Every posting judged, with the decision and the reason. Delete a row to have it judged again. |
 | `boards.csv` | The registry. Set `enabled` to `no` to stop reading a board. A board that fails three runs in a row disables itself. |
 | `runs.csv` | One line per run: boards read, pool size, recorded, skipped, cost. |
 | `postings/` | The text of each recorded posting, saved when it was recorded. |
-| `applications/` | Tailored CVs, one folder per posting. |
+| `applications/` | Tailored CVs and cover letters, one folder per posting. |
 | `companies/` | Company research notes used by the CV reviewer, reused for 45 days. |
 | `tailor_state.json` | CV tailoring in progress between runs (normally empty). |
 
@@ -251,9 +283,10 @@ Anthropic API is the only cost:
 | --- | --- | --- |
 | Job search | up to `MAX_BUDGET_USD` ($2 by default) | up to $14 |
 | CV tailoring, Batch API | about $0.07–0.10 per CV, one per job recorded (6 by default) | about $3–4 |
+| Cover letters, Batch API | about $0.05–0.08 each, only where the posting asks for one | up to about $3 |
 
-Judging comes before discovery, so a tight budget trims discovery (finding new boards)
-first, and Canada's pool, which is judged after India and Singapore's discovery.
+The pools are judged before discovery, so a tight budget trims discovery (finding new
+boards) first.
 
 Tailoring a job by hand (the Tailor CVs workflow with URLs, or `tailor` locally) skips the
 batch discount: about $0.15 per CV. The `cost_usd` column of `data/runs.csv` has each
@@ -278,4 +311,5 @@ test. `parse` takes the raw payload and is pure, so it can be tested without a n
 - A tailored CV's automatic checks catch invented numbers, skills and roles, not every
   overstated claim: "led" where the source says "supported" has no number to check. The
   reviewer step is there for those, and caught every one in the test runs, but read a CV
-  before you send it.
+  before you send it. The same goes for cover letters, whose claims about the company are
+  checked only by the reviewer.

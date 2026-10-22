@@ -2,6 +2,7 @@
 
     python -m jobagent.cv tailor URL [URL ...]          # research, draft, review, render
     python -m jobagent.cv tailor URL --posting-file F    # when the job board can't be read
+    python -m jobagent.cv tailor URL --letter            # always write a cover letter too
     python -m jobagent.cv batch --max 40                 # every untailored job, newest first
     python -m jobagent.cv apply-updates                  # write finished CV paths to jobs.csv
     python -m jobagent.cv baseline --out OUT_DIR         # your full CV, no model calls
@@ -63,7 +64,7 @@ def _tailor(args, source) -> int:
         print(f"\n{url}")
         try:
             result = tailor_url(client, source, url, posting_file=args.posting_file,
-                                company=args.company, role=args.role)
+                                company=args.company, role=args.role, force_letter=args.letter)
         except anthropic.APIError as exc:
             print(f"  API error: {exc}")
             failed += 1
@@ -72,6 +73,10 @@ def _tailor(args, source) -> int:
         _print_problems(result.problems)
         if result.ok:
             print(f"  OK  {result.pdf}  (~${result.cost:.2f})")
+            if result.letter_pdf:
+                print(f"      {result.letter_pdf}")
+            elif result.letter_note:
+                print(f"      cover letter: {result.letter_note}")
         else:
             failed += 1
             details = result.out_dir / "review.json"
@@ -92,7 +97,8 @@ def _batch(args, source) -> int:
     summary = batch.run(anthropic.Anthropic(), source, max_jobs=args.max,
                         deadline_seconds=args.deadline_minutes * 60, poll_seconds=args.poll_seconds)
     batch.write_step_summary(summary)
-    print(f"\nTailored {summary['tailored']}, failed {len(summary['failed'])}, "
+    print(f"\nTailored {summary['tailored']} ({summary.get('letters', 0)} with a cover letter), "
+          f"failed {len(summary['failed'])}, "
           f"skipped {summary['closed']} closed, {summary['missing_text']} without posting text, "
           f"{summary['in_progress']} still in progress. ~${summary['cost_usd']:.2f} at batch prices.")
     for company, role, error in summary["failed"]:
@@ -110,6 +116,8 @@ def main() -> int:
     t.add_argument("--posting-file", type=Path, help="posting text, when its board can't be read")
     t.add_argument("--company", default="", help="when the URL isn't in the tracker")
     t.add_argument("--role", default="", help="when the URL isn't in the tracker")
+    t.add_argument("--letter", action="store_true",
+                   help="write a cover letter even if the posting doesn't ask for one")
 
     b = sub.add_parser("batch", help="tailor untailored tracker jobs through the Batch API")
     b.add_argument("--max", type=int, default=int(os.environ.get("MAX_TAILOR", "40")),

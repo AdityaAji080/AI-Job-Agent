@@ -29,7 +29,7 @@ def market_of(location: str, remote: bool | None = None) -> str:
 
 
 def market_rank(market: str) -> int:
-    """Priority tier; markets in the same tier (India, Singapore) rank equally."""
+    """Priority tier; markets in the same tier (India, Canada) rank equally."""
     return config.MARKET_TIERS.get(market, max(config.MARKET_TIERS.values()) + 1)
 
 

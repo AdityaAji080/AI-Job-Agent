@@ -126,7 +126,7 @@ SKIP_SCHEMA = {
 
 def build_tools(run: Run):
     @tool("get_candidates", "List undecided candidates from the harvested pool for one market, best "
-          "first. Markets: India, Singapore, Canada, Remote (unspecified), Unknown, United States. "
+          "first. Markets: Singapore, India, Canada, Remote (unspecified), Unknown, United States. "
           "Optionally only those from one source (e.g. 'mycareersfuture').",
           {"type": "object", "properties": {
               "market": {"type": "string"},
@@ -164,8 +164,15 @@ def build_tools(run: Run):
         us_room = config.MAX_US_JOBS - run.recorded_by_market["United States"]
         company_used = Counter(run.recorded_by_company)
         market_used = Counter(run.recorded_by_market)
-        share = max(1, int(config.MAX_NEW_JOBS * config.TOP_MARKET_SHARE))
+        slots = config.market_slots()
         batch_ids = {j.get("candidate_id") for j in args.get("jobs") or []}
+
+        def still_waiting(market: str) -> bool:
+            """Open candidates this run could still record: not in this call, and not
+            from a company that has used up its slots (those wait for a later run)."""
+            return any(c2.id not in batch_ids
+                       and company_used[store.company_key(c2.company)] < config.MAX_PER_COMPANY
+                       for c2 in run.open_candidates(market))
         jobs, refused = [], []
         for job in args.get("jobs") or []:
             cid = job.pop("candidate_id", "") or ""
@@ -190,18 +197,20 @@ def build_tools(run: Run):
             if len(jobs) >= room:
                 refused.append({"role": job.get("role"), "reason": "run limit reached"})
                 continue
-            if job["market"] == "United States":
-                if us_room <= 0:
+            if job["market"] == "United States" and us_room <= 0:
+                refused.append({"role": job.get("role"),
+                                "reason": f"United States cap ({config.MAX_US_JOBS}) reached for this run"})
+                continue
+            market = job["market"]
+            if market in slots and market_used[market] >= slots[market]:
+                # Over its share: only once every market still under its share is done.
+                waiting = [m for m in slots if m != market and market_used[m] < slots[m]
+                           and still_waiting(m)]
+                if waiting:
                     refused.append({"role": job.get("role"),
-                                    "reason": f"United States cap ({config.MAX_US_JOBS}) reached for this run"})
-                    continue
-                us_room -= 1
-            if job["market"] in config.TOP_MARKETS and market_used[job["market"]] >= share:
-                other = next(m for m in config.TOP_MARKETS if m != job["market"])
-                if any(c2.id not in batch_ids for c2 in run.open_candidates(other)):
-                    refused.append({"role": job.get("role"),
-                                    "reason": f"{job['market']} has its share ({share}) while {other} "
-                                              f"still has candidates; judge {other} next"})
+                                    "reason": f"{market} has its share ({slots[market]}) while "
+                                              f"{' and '.join(waiting)} still has candidates; judge "
+                                              f"{waiting[0]} next and leave this one undecided"})
                     continue
             company = store.company_key(job["company"])
             if company_used[company] >= config.MAX_PER_COMPANY:
@@ -209,6 +218,8 @@ def build_tools(run: Run):
                                 "reason": f"{job['company']} already has {config.MAX_PER_COMPANY} this run; "
                                           "leave its other roles undecided for a later run"})
                 continue
+            if market == "United States":
+                us_room -= 1
             company_used[company] += 1
             market_used[job["market"]] += 1
             job["_company"] = company
@@ -396,7 +407,8 @@ async def main() -> int:
         today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS, max_us=config.MAX_US_JOBS,
         max_company=config.MAX_PER_COMPANY,
         fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
-        share=max(1, int(config.MAX_NEW_JOBS * config.TOP_MARKET_SHARE)),
+        sg_slots=config.market_slots().get("Singapore", 0),
+        shares=", ".join(f"{m} {n}" for m, n in config.market_slots().items()),
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))
 

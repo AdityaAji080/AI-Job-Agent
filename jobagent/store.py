@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlsplit
 from . import config
 
 COLUMNS = ["date_added", "company", "role", "location", "market", "posted", "deadline_or_start",
-           "compensation", "experience", "url", "why", "status", "applied", "cv"]
+           "compensation", "experience", "url", "why", "status", "applied", "cv", "cover_letter"]
 SEEN_COLUMNS = ["key", "decision", "reason", "company", "role", "date"]
 
 # Query parameters that identify a job (everything else, like utm_*, is noise).

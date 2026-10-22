@@ -1,0 +1,43 @@
+%% Rendered by jobagent.cv.letter. Same type and header as the CV template. The body
+%% comes from the tailored letter; everything else from the source and the posting.
+%% Every interpolated value is LaTeX-escaped. Delimiters are explained in render.py.
+\documentclass[11pt,letterpaper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.92]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[letterspace=180]{microtype}
+\usepackage[left=2.2cm,right=2.2cm,top=1.6cm,bottom=1.6cm]{geometry}
+\usepackage[hidelinks,pdfusetitle]{hyperref}
+% Map every glyph to Unicode so applicant-tracking systems can read the text layer.
+\input{glyphtounicode}
+\pdfgentounicode=1
+
+\hypersetup{pdftitle={((( name ))) Cover Letter}, pdfauthor={((( name )))}}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.75em}
+\linespread{1.12}
+
+\begin{document}
+
+\begin{center}
+  {\Large\bfseries\lsstyle\MakeUppercase{((( name )))}}\\[3pt]
+  {\small ((( contact_line )))}
+\end{center}
+\vspace{0.6em}
+
+((( date )))
+
+((( company )))\\
+\textbf{((( role )))}
+
+((( greeting )))
+
+((* for p in paragraphs *))
+((( p )))
+
+((* endfor *))
+((( closing )))\\[0.4em]
+((( name )))
+
+\end{document}

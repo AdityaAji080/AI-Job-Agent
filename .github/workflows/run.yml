@@ -64,6 +64,7 @@ jobs:
           MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '6' }}
           MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '1' }}
           MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '2' }}
+          MARKET_SHARES: ${{ vars.MARKET_SHARES || '' }}
           JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
 
