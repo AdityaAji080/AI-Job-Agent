@@ -113,6 +113,12 @@ class Run:
         return Counter(c.market for c in self.open_candidates())
 
 
+def kickoff_start() -> str:
+    """Where the run begins: the first market in priority order (Singapore), the same
+    order the system prompt gives."""
+    return f"Begin with {filters.MARKET_ORDER[0]}."
+
+
 def text_result(payload) -> dict:
     body = payload if isinstance(payload, str) else json.dumps(payload, indent=1, ensure_ascii=False)
     return {"content": [{"type": "text", "text": body}]}
@@ -344,12 +350,21 @@ def build_tools(run: Run):
         if not result.ok:
             return text_result(f"Registered, but the board could not be read: {result.error}")
         run.registered.append(f"{entry.company} ({entry.ats})")
-        found = rank(result.candidates)
+        # Only what made it into the pool: absorb() leaves out companies on hold-back, roles
+        # already tracked and duplicates, and add_jobs would refuse those anyway.
+        found = rank([c for c in result.candidates if c.id in run.pool and c.id not in run.decided])
+        left_out = len(result.candidates) - len(found)
+        notes = []
+        if left_out:
+            notes.append(f"{left_out} more left out (company on hold-back, already tracked, "
+                         "or the same role listed elsewhere).")
+        if len(found) > 20:
+            notes.append("More via get_candidates.")
         return text_result({"status": "registered" if new else "re-harvested",
                             "board": entry.key, "postings_on_board": result.postings,
                             "new_candidates": len(found),
                             "candidates": [c.summary() for c in found[:20]],
-                            "note": "More via get_candidates." if len(found) > 20 else ""})
+                            "note": " ".join(notes)})
 
     @tool("find_boards", "Given company names, check Greenhouse, Lever, Ashby, SmartRecruiters, Workable "
           "and Recruitee for a job board with open postings, by trying likely slugs. Returns each hit's "
@@ -368,7 +383,8 @@ def build_tools(run: Run):
            "required": ["urls"]})
     async def is_known(args):
         known = store.known_keys()
-        return text_result({u: (store.job_key(u) in known) for u in args.get("urls") or []})
+        return text_result({u: bool(store.key_aliases(store.job_key(u)) & known)
+                            for u in args.get("urls") or []})
 
     return [get_candidates, get_posting, add_jobs, skip_candidates, register_board, find_boards, is_known]
 
@@ -399,6 +415,44 @@ def harvest_summary(run: Run) -> str:
     return "\n".join(lines)
 
 
+def append_run_row(row: dict) -> None:
+    """Add a row to runs.csv under the right headings.
+
+    A file written by an older version has fewer columns in its header. Rows appended to it
+    with the current columns used to land one column off (the `probed` count under
+    `cost_usd`, the cost under `turns`), so such a file is rewritten once with the current
+    header: rows as long as the old header are read by it, rows as long as the current
+    columns by those.
+    """
+    path = config.RUNS_CSV
+    fields = list(row)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists() or path.stat().st_size == 0:
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            w.writerow(row)
+        return
+    with open(path, newline="", encoding="utf-8") as f:
+        lines = list(csv.reader(f))
+    header, body = lines[0], [r for r in lines[1:] if r]
+    if header == fields:
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, fieldnames=fields).writerow(row)
+        return
+    columns = fields + [c for c in header if c and c not in fields]
+    rows = []
+    for r in body:
+        names = fields if len(r) == len(fields) and len(r) != len(header) else header
+        rows.append(dict(zip(names, r)))
+    tmp = path.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows + [row])
+    tmp.replace(path)
+
+
 def log_run(run: Run, result: ResultMessage | None, final_text: str) -> None:
     row = {
         "date": date.today().isoformat(),
@@ -415,13 +469,7 @@ def log_run(run: Run, result: ResultMessage | None, final_text: str) -> None:
         "outcome": result.subtype if result else "no result",
         "summary": " ".join(final_text.split())[:500],
     }
-    new = not config.RUNS_CSV.exists()
-    config.RUNS_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with open(config.RUNS_CSV, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(row))
-        if new:
-            w.writeheader()
-        w.writerow(row)
+    append_run_row(row)
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
@@ -507,8 +555,7 @@ async def main() -> int:
 
     final_text, result = "", None
     try:
-        start = "Begin with India."
-        kickoff = KICKOFF.format(harvest_summary=run.harvest_text, start=start)
+        kickoff = KICKOFF.format(harvest_summary=run.harvest_text, start=kickoff_start())
         async for msg in query(prompt=kickoff, options=options):
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:

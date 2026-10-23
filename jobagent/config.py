@@ -89,7 +89,7 @@ WORKDAY_SEARCH_TERMS = [
     "research engineer", "robotics", "embedded", "perception",
 ]
 WORKDAY_MAX_PER_TERM = 60
-DESCRIPTION_CHARS = 12000
+DESCRIPTION_CHARS = 12000  # how much of a posting the model sees per get_posting
 
 # --- MyCareersFuture (Singapore's national job portal) -------------------------
 # Employers must advertise there for 14 days before applying for an Employment Pass,
@@ -101,7 +101,7 @@ MCF_SEARCH_TERMS = [
     "backend engineer", "solutions engineer",
 ]
 MCF_PAGES_PER_TERM = 3      # x 50 results per page
-MCF_MAX_AGE_DAYS = 45       # postings older than this are ignored at harvest  # how much of a posting the model sees per get_posting
+MCF_MAX_AGE_DAYS = 45       # postings older than this are ignored at harvest
 
 # --- Title prefilter ----------------------------------------------------------
 # A title must match INCLUDE and must not match EXCLUDE. Deliberately loose:
@@ -171,11 +171,18 @@ MARKETS: list[tuple[str, re.Pattern]] = [
         r"maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|"
         r"nevada|new hampshire|new jersey|new mexico|north carolina|north dakota|ohio|"
         r"oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|"
-        r"texas|utah|vermont|virginia|wisconsin|wyoming|"
-        r", ?(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|"
-        r"ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)\b",
+        r"texas|utah|vermont|virginia|wisconsin|wyoming",
         re.I)),
 ]
+# "Austin, TX". Checked after every market name above, because several state codes are
+# also country codes ("Berlin, DE", "Tel Aviv, IL", "Jakarta, ID"): see filters.market_of.
+US_STATE_CODE = re.compile(
+    r", ?(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|"
+    r"ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)\b", re.I)
+# State codes that are also ISO country codes. After a place named in OTHER_PLACES they
+# mean the country ("Berlin, DE"), not the state.
+COUNTRY_LIKE_STATE_CODES = {"al", "ar", "co", "de", "ga", "id", "il", "la", "ma", "md", "me", "mn",
+                            "ms", "mt", "nc", "ne", "pa", "sc", "sd", "tn", "va"}
 # Locations that are clearly somewhere else. Anything matching no market and
 # none of these is kept as "Unknown" and ranked last, never silently dropped.
 OTHER_PLACES = re.compile(

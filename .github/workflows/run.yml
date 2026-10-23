@@ -91,9 +91,11 @@ jobs:
   # CVs for the jobs just recorded (and any backlog), through the Batch API at half price.
   # Batches usually finish within the hour; one still running at the time limit is
   # collected by the next run, so nothing is lost or paid for twice.
+  # It still runs when the search step fails (a backlog is worth tailoring), but never
+  # when the tests failed: !cancelled() alone would let untested code spend money.
   tailor:
-    needs: run
-    if: ${{ !cancelled() && github.event.inputs.mode != 'harvest-only' }}
+    needs: [tests, run]
+    if: ${{ !cancelled() && needs.tests.result == 'success' && github.event.inputs.mode != 'harvest-only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:

@@ -109,6 +109,24 @@ async def _from_workday(client, board: Board, url: str) -> Posting | None:
     return posting
 
 
+_SR_POSTING = re.compile(r"^/([^/]+)/(\d+)(?:-[^/]*)?/?$")
+
+
+async def _from_smartrecruiters(client, board: Board, url: str) -> Posting | None:
+    """SmartRecruiters boards are read only up to 2,000 postings (some, like Bosch, have
+    more), so a posting missing from that list proves nothing. Read it by its id: the
+    posting's own address answers 404 once it closes."""
+    from urllib.parse import urlsplit
+    m = _SR_POSTING.match(urlsplit(url).path)
+    if not m:
+        return None
+    sr = ADAPTERS["smartrecruiters"]
+    posting = Posting(ats="smartrecruiters", board_slug=board.slug, company=board.company or board.slug,
+                      job_id=m.group(2), title="", url=url, needs_detail=True)
+    await sr.detail(client, posting)  # BoardError "404" when it has closed
+    return posting
+
+
 def _boards_for(url: str, company: str) -> list[Board]:
     """The board a URL is on, or failing that, registered boards for the same company
     (Greenhouse postings often live on the company's own domain, like ?gh_jid=...)."""
@@ -138,13 +156,19 @@ async def check(url: str, company: str = "") -> tuple[str, Posting | None]:
             if "mycareersfuture.gov.sg" in url:
                 p = await _from_mcf(client, url)
                 return (CLOSED if p and p.extra.get("closed") else OPEN if p else UNKNOWN), p
-            direct = detect_board(url, company) is not None
-            for board in _boards_for(url, company):
-                adapter = ADAPTERS.get(board.ats)
-                if adapter is None:
-                    continue
-                if board.ats == "workday":
-                    p = await _from_workday(client, board, url)
+        except BoardError as exc:
+            return (CLOSED if "404" in str(exc) else UNKNOWN), None
+        except Exception:
+            return UNKNOWN, None
+        direct = detect_board(url, company) is not None
+        for board in _boards_for(url, company):
+            adapter = ADAPTERS.get(board.ats)
+            if adapter is None:
+                continue
+            try:
+                if direct and board.ats in ("workday", "smartrecruiters"):
+                    read_one = _from_workday if board.ats == "workday" else _from_smartrecruiters
+                    p = await read_one(client, board, url)
                     if p:
                         return (CLOSED if p.extra.get("closed") else OPEN), p
                     continue
@@ -153,10 +177,14 @@ async def check(url: str, company: str = "") -> tuple[str, Posting | None]:
                         return OPEN, await _read_detail(client, adapter, p)
                 if direct:  # the posting's own board, read in full, no longer has it
                     return CLOSED, None
-        except BoardError as exc:
-            return (CLOSED if "404" in str(exc) else UNKNOWN), None
-        except Exception:
-            return UNKNOWN, None
+            except BoardError as exc:
+                # A 404 is evidence only from the posting's own board. A board found by
+                # company name may simply have moved; try the next one.
+                if direct:
+                    return (CLOSED if "404" in str(exc) else UNKNOWN), None
+            except Exception:
+                if direct:
+                    return UNKNOWN, None
     return UNKNOWN, None
 
 

@@ -30,6 +30,23 @@ def job_key(url: str) -> str:
     return host + path + ("?" + "&".join(f"{k}={v}" for k, v in ids) if ids else "")
 
 
+# SmartRecruiters lists a posting as /<company>/<id> but its own page (and the tracker)
+# has /<company>/<id>-<title-slug>. Both forms are the same job.
+_SR_ID = re.compile(r"^(jobs\.smartrecruiters\.com/[^/?]+/\d+)-[^/?]*$")
+
+
+def key_aliases(key: str) -> set[str]:
+    """A job_key plus any other spelling of the same posting's key."""
+    if not key:
+        return set()
+    m = _SR_ID.match(key)
+    return {key, m.group(1)} if m else {key}
+
+
+def _with_aliases(keys) -> set[str]:
+    return {a for k in keys for a in key_aliases(k)}
+
+
 _LEGAL = re.compile(r"\b(pte|private|ltd|limited|llp|llc|inc|corp|corporation|co|plc|gmbh|"
                    r"singapore|india|canada|technologies|technology)\b")
 
@@ -184,14 +201,14 @@ def recently_recorded(days: int, today: date | None = None) -> dict[str, str]:
 
 def known_keys() -> set[str]:
     """Every posting already tracked or already judged; the harvester skips these."""
-    return {job_key(j.get("url", "")) for j in read_jobs()} | {s["key"] for s in read_seen()}
+    return _with_aliases({job_key(j.get("url", "")) for j in read_jobs()} | {s["key"] for s in read_seen()})
 
 
 def append_jobs(jobs: list[dict]) -> dict:
     """Add jobs, rejecting duplicates by URL and by company+role+location."""
     ensure_schema()
     existing = read_jobs()
-    keys = {job_key(j.get("url", "")) for j in existing + read_archived()}
+    keys = _with_aliases({job_key(j.get("url", "")) for j in existing + read_archived()})
     roles = tracked_role_keys()
     added, rejected = [], []
     for job in jobs:
@@ -200,10 +217,10 @@ def append_jobs(jobs: list[dict]) -> dict:
         if not key:
             rejected.append({"role": job.get("role"), "reason": "no url"})
             continue
-        if key in keys or rk in roles:
+        if key_aliases(key) & keys or rk in roles:
             rejected.append({"role": job.get("role"), "reason": "already tracked"})
             continue
-        keys.add(key)
+        keys |= key_aliases(key)
         roles.add(rk)
         row = {c: job.get(c, "") for c in COLUMNS}
         row.update(date_added=date.today().isoformat(), status=job.get("status") or "new")
@@ -217,12 +234,12 @@ def append_jobs(jobs: list[dict]) -> dict:
 
 def mark_seen(items: list[dict]) -> int:
     """Remember judged postings so later runs don't spend tokens on them again."""
-    have = {s["key"] for s in read_seen()}
+    have = _with_aliases(s["key"] for s in read_seen())
     rows = []
     for item in items:
         key = job_key(item.get("url", ""))
-        if key and key not in have:
-            have.add(key)
+        if key and not key_aliases(key) & have:
+            have |= key_aliases(key)
             rows.append({"key": key, "decision": item.get("decision", "skipped"),
                          "reason": (item.get("reason") or "")[:300], "company": item.get("company", ""),
                          "role": item.get("role", ""), "date": date.today().isoformat()})
