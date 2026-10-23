@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from .. import config
 from .content import Problem, numbers
 from .render import _env, _squash, compile_pdf
 
@@ -22,7 +23,7 @@ MIN_WORDS = 180
 MAX_WORDS = 380
 MIN_PARAGRAPHS = 3
 MAX_PARAGRAPHS = 5
-WANTED = {"required", "invited"}
+ASKED = {"required", "invited"}
 
 _PLACEHOLDER = re.compile(r"\[[^\]]*\]|\{[^}]*\}|<[^>]+>|\bX{3,}\b|lorem ipsum", re.I)
 _CLICHES = re.compile(r"\bpassionate\b|perfect fit|\bdynamic\b|excited to apply|great asset|"
@@ -30,7 +31,24 @@ _CLICHES = re.compile(r"\bpassionate\b|perfect fit|\bdynamic\b|excited to apply|
 
 
 def wanted(decision: dict | None) -> bool:
-    return bool(decision) and decision.get("decision") in WANTED
+    """Whether to write a letter, by the posting's stance and config.COVER_LETTERS."""
+    if not decision:
+        return False
+    stance = decision.get("decision")
+    if config.COVER_LETTERS == "when_asked":
+        return stance in ASKED
+    return stance != "declined"  # "unless_declined": forms often have a box the posting never mentions
+
+
+def why(decision: dict | None) -> str:
+    """What the letter writer is told about why this application has a letter."""
+    stance = (decision or {}).get("decision")
+    if stance in ASKED:
+        return (decision or {}).get("reason", "") or "the posting asks for one"
+    if stance and stance != "declined":
+        return ("the posting doesn't mention one; it's for the application form's cover letter "
+                "field, so write it as a letter for this role, not a reply to the posting")
+    return "requested by hand"
 
 
 def _words(text: str) -> int:

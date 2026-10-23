@@ -33,7 +33,21 @@ MAX_NEW_JOBS = int(os.environ.get("MAX_NEW_JOBS", "6"))
 MAX_US_JOBS = int(os.environ.get("MAX_US_JOBS", "1"))
 # One large board (a university, a big employer) shouldn't fill a run on its own.
 # Roles past the cap stay in the pool for later runs.
-MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "2"))
+MAX_PER_COMPANY = int(os.environ.get("MAX_PER_COMPANY", "1"))
+# A company that had a job recorded in the last this-many days is held back, so the
+# tracker fills with many different employers rather than the same few every day.
+# Its roles stay undecided and come back when the time is up.
+COMPANY_COOLDOWN_DAYS = int(os.environ.get("COMPANY_COOLDOWN_DAYS", "14"))
+# Crowded postings: a large employer (this many open roles or more on its own board) or
+# an ad that already has this many applicants. They draw the most applicants, so they
+# rank after other postings and only MAX_CROWDED_PER_RUN of them are recorded per run.
+LARGE_EMPLOYER_POSTINGS = int(os.environ.get("LARGE_EMPLOYER_POSTINGS", "150"))
+CROWDED_APPLICANTS = int(os.environ.get("CROWDED_APPLICANTS", "100"))
+MAX_CROWDED_PER_RUN = int(os.environ.get("MAX_CROWDED_PER_RUN", "2"))
+# Cover letters: "unless_declined" writes one for every job unless the posting asks not
+# to send one (application forms often have a box the posting never mentions);
+# "when_asked" only where the posting asks for or invites one.
+COVER_LETTERS = os.environ.get("COVER_LETTERS", "unless_declined")
 # Each market's share of a run's slots. A market at its share may take more only once
 # every other market still under its share has no candidates left, so spare slots flow
 # over and none are wasted. Singapore first (where the MSc is), then India and Canada.

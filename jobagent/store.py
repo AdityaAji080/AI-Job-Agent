@@ -41,6 +41,29 @@ def company_key(company: str) -> str:
     return " ".join(core) or text.strip()
 
 
+# Words that don't tell employers apart, for same_employer().
+_GENERIC = {"holdings", "holding", "group", "operations", "asia", "pacific", "sea", "apac", "emea",
+            "international", "global", "services", "solutions", "systems", "labs", "lab", "ai", "tech",
+            "the", "and", "of", "company", "enterprises", "ventures", "digital", "software", "data",
+            "research", "taxi", "health", "financial", "capital", "partners", "engineering", "robotics"}
+
+
+def _distinct_words(company: str) -> set[str]:
+    return {w for w in company_key(company).split() if len(w) >= 3 and w not in _GENERIC}
+
+
+def same_employer(a: str, b: str) -> bool:
+    """'Grab' and 'Grab Taxi Holdings', or 'Bosch' and 'Robert Bosch (SEA)': the same employer
+    when one name's distinctive words all appear in the other's. 'Applied Intuition' and
+    'Applied Materials' are not; nor are names with no distinctive word at all."""
+    if company_key(a) == company_key(b):
+        return bool(company_key(a))
+    wa, wb = _distinct_words(a), _distinct_words(b)
+    if not wa or not wb:
+        return False
+    return wa <= wb or wb <= wa
+
+
 def role_key(company: str, role: str) -> str:
     norm = lambda s: re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
     return f"{company_key(company)}|{norm(role)}"
@@ -137,6 +160,26 @@ def tracked_role_keys() -> set[str]:
     a new URL is the same job."""
     return {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
             for j in read_jobs() + read_archived()}
+
+
+def recently_recorded(days: int, today: date | None = None) -> dict[str, str]:
+    """company_key -> the latest date a job of theirs was recorded, for companies recorded
+    within the last `days` days (from seen.csv, the tracker and the archive)."""
+    if days <= 0:
+        return {}
+    today = today or date.today()
+    latest: dict[str, str] = {}
+    dated = [(s.get("company", ""), s.get("date", "")) for s in read_seen() if s.get("decision") == "recorded"]
+    dated += [(j.get("company", ""), j.get("date_added", "")) for j in read_jobs() + read_archived()]
+    for company, when in dated:
+        try:
+            age = (today - date.fromisoformat(when)).days
+        except (TypeError, ValueError):
+            continue
+        key = company_key(company)
+        if key and 0 <= age < days and when > latest.get(key, ""):
+            latest[key] = when
+    return latest
 
 
 def known_keys() -> set[str]:

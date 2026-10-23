@@ -236,3 +236,13 @@ def test_market_still_comes_before_freshness(tmp_path, monkeypatch):
     india_old = to_candidate(Posting("lever", "x", "X", "in", "AI Engineer", "https://a/in", location="Pune",
                                      posted=date.fromordinal(today.toordinal() - 40).isoformat()), b)
     assert [c.market for c in rank([us_fresh, india_old])] == ["India", "United States"]
+
+
+@pytest.mark.parametrize("a,b,same", [
+    ("Grab", "Grab Taxi Holdings", True), ("GRAB TAXI HOLDINGS PTE. LTD.", "Grab", True),
+    ("Bosch", "Robert Bosch (SEA) Pte Ltd", True), ("Dyson Operations", "Dyson", True),
+    ("Applied Intuition", "Applied Materials", False), ("Sarvam AI", "AI Singapore", False),
+    ("Stripe", "Stripe", True), ("NVIDIA", "Nvidia Singapore Pte Ltd", True), ("", "", False),
+])
+def test_same_employer(a, b, same):
+    assert store.same_employer(a, b) is same

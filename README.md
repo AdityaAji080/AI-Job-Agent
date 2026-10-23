@@ -3,7 +3,7 @@
 A scheduled job-search agent that reads company job boards directly, has Claude judge
 each opening against a written set of criteria, keeps a deduplicated tracker that grows a
 little every run, and writes a tailored, one-page CV for every job it records, plus a
-cover letter where the posting asks for one.
+cover letter unless the posting asks you not to send one.
 
 It runs every morning on GitHub Actions, recording a handful of jobs a day with the freshest
 postings first, and needs no machine left on. See [What it costs](#what-it-costs).
@@ -68,7 +68,13 @@ flowchart LR
 - **No single source dominates.** Singapore comes first, then India and Canada as equals.
   Each has a share of the run's slots (by default Singapore 60%, India and Canada 20% each:
   3, 1 and 1 of 5) and takes more only once the others have no candidates left; the US is
-  capped, and no company can take more than two slots in a run. The rest wait in the pool.
+  capped. The rest wait in the pool.
+- **Many employers, few crowds.** A company is recorded at most once per run, and a company
+  that had a job recorded in the last 14 days is held back (its roles come back later).
+  Postings from large employers (150+ open roles on their own board) or with 100+
+  applicants are marked crowded, ranked after the rest, and capped at two per run.
+  Discovery is aimed at employers most applicants never think of: scale-ups, SMEs,
+  regional hubs, research institutes and industrial firms hiring for AI.
   A job listed both on a company's board and on MyCareersFuture is judged once.
 - **Roles on unsupported systems still count.** For employers on Darwinbox, Keka, iCIMS
   and the like, the agent falls back to search and fetch, with explicit verification
@@ -76,8 +82,8 @@ flowchart LR
 - **Every recorded job gets a CV, and the CV can't invent anything.** After each search, a
   second job tailors a CV per new job: a model selects and rewords bullets from your CV
   source, a second model reviews it as the hiring manager would, and deterministic checks
-  reject any number, skill or role the source doesn't contain. Where the posting asks for
-  a cover letter, one is written the same way, on the finished CV. See
+  reject any number, skill or role the source doesn't contain. A cover letter is written
+  the same way, on the finished CV, unless the posting declines one. See
   [Tailored CVs](#tailored-cvs).
 
 ## Project layout
@@ -123,7 +129,10 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Secret `DATA_REPO_TOKEN`: the token from step 2
    - Variable `DATA_REPO`: `your-username/job-agent-data`
    - Optional variables `MAX_BUDGET_USD` (default 2.00), `MAX_NEW_JOBS` (default 6),
-     `MAX_US_JOBS` (default 1), `MAX_PER_COMPANY` (default 2), `MARKET_SHARES` (default
+     `MAX_US_JOBS` (default 1), `MAX_PER_COMPANY` (default 1), `COMPANY_COOLDOWN_DAYS`
+     (default 14), `LARGE_EMPLOYER_POSTINGS` (default 150), `CROWDED_APPLICANTS` (default
+     100), `MAX_CROWDED_PER_RUN` (default 2), `COVER_LETTERS` (default `unless_declined`,
+     or `when_asked`), `MARKET_SHARES` (default
      `Singapore=0.6,India=0.2,Canada=0.2`), `JOBAGENT_MODEL` (default `sonnet`; set to
      `opus` for the larger model)
      and `MAX_TAILOR` (default 40: CVs tailored per scheduled run)
@@ -182,8 +191,8 @@ For each posting there are five steps, each a single API request:
 
 1. **Research** what the company does (Sonnet with up to 3 web searches). Notes are cached
    per company in `data/companies/` for 45 days, so the fourth Cohere role costs nothing here.
-2. **Draft** a tailored selection of your CV source (Opus). The draft also decides whether
-   the application needs a cover letter (see [Cover letters](#cover-letters)).
+2. **Draft** a tailored selection of your CV source (Opus). The draft also records what
+   the posting says about a cover letter (see [Cover letters](#cover-letters)).
 3. **Critique** it as the hiring manager would (Sonnet): claims the source doesn't support,
    requirements the source covers but the draft leaves out, emphasis.
 4. **Revise** with that review (Opus), skipped when the review says it's ready.
@@ -202,11 +211,13 @@ job's `review.json`), or `skipped: posting closed`. Clear the cell to have it tr
 
 ### Cover letters
 
-The CV's draft step decides, from the posting text alone, whether the application needs a
-letter: **required** (the posting asks for one), **invited** (it mentions one as optional,
-asks why you want the role or company, or asks you to apply by email to a named person),
-or **not needed** (no mention, or it asks you not to send one). Required and invited get
-a letter; the decision costs no extra request.
+The CV's draft step records, from the posting text alone, what it says about a letter:
+**required**, **invited** (optional, asks why you want the role, or apply by email to a
+named person), **not mentioned**, or **declined** (asks you not to send one). By default
+(`COVER_LETTERS=unless_declined`) every job gets a letter unless the posting declines one,
+because application forms often have a cover letter box the posting never mentions. With
+`COVER_LETTERS=when_asked`, only required and invited do. The decision costs no extra
+request.
 
 The letter is written after the CV is final, so the two agree, in the same steps: a draft
 (Opus) from your CV source, the finished CV, the posting and the company notes; a
@@ -218,8 +229,8 @@ details, the date, the company and role, and the signature come from the source 
 posting, never from the model.
 
 A letter that fails never holds back the CV. The tracker's `cover_letter` column holds the
-letter's path, `not needed: <reason>`, or `failed: <reason>`. A posting's text can't show
-an application form's optional "cover letter" field, so for those, run the Tailor CVs
+letter's path, `not wanted: <reason>` (the posting declined one), `not needed: <reason>`
+(with `when_asked`), or `failed: <reason>`. To force a letter anyway, run the Tailor CVs
 workflow with the job's URL and **letter** ticked (or `tailor URL --letter`). At batch
 prices a letter costs about $0.05–0.08.
 
@@ -300,7 +311,7 @@ Anthropic API is the only cost:
 | --- | --- | --- |
 | Job search | up to `MAX_BUDGET_USD` ($2 by default) | up to $14 |
 | CV tailoring, Batch API | about $0.07–0.10 per CV, one per job recorded (6 by default) | about $3–4 |
-| Cover letters, Batch API | about $0.05–0.08 each, only where the posting asks for one | up to about $3 |
+| Cover letters, Batch API | about $0.05–0.08 each, for every job unless the posting declines one | about $2–4 |
 
 The pools are judged before discovery, so a tight budget trims discovery (finding new
 boards) first.

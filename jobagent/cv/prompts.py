@@ -46,12 +46,13 @@ requirements the source cannot support, honestly; they are for the person, not t
 
 ## Cover letter
 
-Also decide, in `cover_letter`, whether this application needs a cover letter, judging
-from the posting text alone:
-- "required": the posting asks for one, or says applications without one won't be read.
-- "invited": the posting mentions one as optional or welcome, asks applicants to say why
-  they want this role or company, or asks them to apply by email to a named person.
-- "not_needed": the posting doesn't mention one, or asks applicants not to send one.
+Also record, in `cover_letter`, what the posting says about a cover letter, judging from
+the posting text alone:
+- "required": it asks for one, or says applications without one won't be read.
+- "invited": it mentions one as optional or welcome, asks applicants to say why they want
+  this role or company, or asks them to apply by email to a named person.
+- "not_mentioned": it says nothing about one.
+- "declined": it asks applicants not to send one, or says letters won't be read.
 Give the `reason` as a short phrase naming what in the posting decided it.
 
 ## CV source

@@ -168,7 +168,7 @@ def build_requests(state: dict, source: dict) -> tuple[list[dict], dict]:
             params = llm.repair_request(source, posting, job["cv"], errors)
         elif stage == "letter":
             decision = job.get("decision")
-            why = ((decision or {}).get("reason", "") if letters.wanted(decision) else "") or "requested by hand"
+            why = letters.why(decision) if letters.wanted(decision) else "requested by hand"
             params = llm.letter_request(source, posting, job["cv"], notes, why)
         elif stage == "letter_review":
             params = llm.letter_critique_request(source, posting, job["cv"], job["letter"], notes)

@@ -94,7 +94,8 @@ def letter_column(decision: dict | None, pdf: Path | None, error: str = "", forc
     if not decision:
         return ""
     reason = " ".join((decision.get("reason") or "").split())
-    return f"not needed: {reason}"[:150] if reason else "not needed"
+    label = "not wanted" if decision.get("decision") == "declined" else "not needed"
+    return f"{label}: {reason}"[:150] if reason else label
 
 
 # ---------------------------------------------------------------- the pipeline
@@ -213,7 +214,7 @@ def _write_letter(step, source: dict, posting: dict, cv: dict, notes: str, decis
                   record: dict, log) -> tuple[dict | None, str]:
     """Draft, review, revise and check the letter. Returns (letter, error); never raises
     for a bad reply, because a failed letter mustn't cost the CV."""
-    why = ((decision or {}).get("reason", "") if letters.wanted(decision) else "") or "requested by hand"
+    why = letters.why(decision) if letters.wanted(decision) else "requested by hand"
     info = record["cover_letter"]
     try:
         log("  writing the cover letter")
