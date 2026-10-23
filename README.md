@@ -67,7 +67,8 @@ flowchart LR
   use up the run's job slots, so it continues after they're full.
 - **No single source dominates.** Singapore comes first, then India and Canada as equals.
   Each has a share of the run's slots (by default Singapore 60%, India and Canada 20% each:
-  3, 1 and 1 of 5) and takes more only once the others have no candidates left; the US is
+  3, 1 and 1 of 5). A market that hasn't filled its share after 15 of its candidates have
+  been judged (or that runs out) gives its slots to the others, Singapore first; the US is
   capped. The rest wait in the pool.
 - **Many employers, few crowds.** A company is recorded at most once per run, and a company
   that had a job recorded in the last 14 days is held back (its roles come back later).
@@ -133,7 +134,8 @@ Personal files live in a **separate private repository**, so this one can be pub
      (default 14), `LARGE_EMPLOYER_POSTINGS` (default 150), `CROWDED_APPLICANTS` (default
      100), `MAX_CROWDED_PER_RUN` (default 2), `COVER_LETTERS` (default `unless_declined`,
      or `when_asked`), `MARKET_SHARES` (default
-     `Singapore=0.6,India=0.2,Canada=0.2`), `JOBAGENT_MODEL` (default `sonnet`; set to
+     `Singapore=0.6,India=0.2,Canada=0.2`), `MARKET_RELEASE_AFTER` (default 15: candidates
+     judged in a market before its unfilled share goes to the others), `JOBAGENT_MODEL` (default `sonnet`; set to
      `opus` for the larger model)
      and `MAX_TAILOR` (default 40: CVs tailored per scheduled run)
 
@@ -234,8 +236,12 @@ letter's path, `not wanted: <reason>` (the posting declined one), `not needed: <
 workflow with the job's URL and **letter** ticked (or `tailor URL --letter`). At batch
 prices a letter costs about $0.05–0.08.
 
-The posting text comes from `data/postings/`, which `add_jobs` fills as jobs are recorded;
-older tracker rows are re-read from their job board (`python -m jobagent.postings URL`).
+The posting text comes from `data/postings/`, which `add_jobs` fills as jobs are recorded:
+the job board's own text, or, for a job the agent found by open search, the text it read on
+the page (`posting_text`). A job with neither is read again at tailoring time: from its job
+board, or else from the page itself (its schema.org JobPosting data, which most careers
+sites and LinkedIn carry, or failing that its visible text). Older tracker rows can be
+re-read by hand with `python -m jobagent.postings URL`.
 Output goes to `data/applications/<company>_<role>_<id>/`: the PDF (named after you, e.g.
 `Jane_Example_CV.pdf`, since that is what recruiters see), `tailored.json`, and
 `review.json` with every step, the review, any gaps the posting asks for that your CV can't

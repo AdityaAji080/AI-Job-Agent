@@ -68,6 +68,11 @@ def _parse_shares(text: str) -> dict[str, float]:
 
 
 MARKET_SHARES = _parse_shares(os.environ.get("MARKET_SHARES", ""))
+# A market under its share holds its spare slots only until this many of its candidates
+# have been judged (recorded or skipped) this run. Pools run to thousands, so "until it has
+# no candidates left" would hold them all run; after a fair look that found too little,
+# its slots go to the other markets.
+MARKET_RELEASE_AFTER = int(os.environ.get("MARKET_RELEASE_AFTER", "15"))
 
 
 def market_slots(max_jobs: int | None = None) -> dict[str, int]:

@@ -69,6 +69,7 @@ jobs:
           CROWDED_APPLICANTS: ${{ vars.CROWDED_APPLICANTS || '100' }}
           MAX_CROWDED_PER_RUN: ${{ vars.MAX_CROWDED_PER_RUN || '2' }}
           MARKET_SHARES: ${{ vars.MARKET_SHARES || '' }}
+          MARKET_RELEASE_AFTER: ${{ vars.MARKET_RELEASE_AFTER || '15' }}
           JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
 

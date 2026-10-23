@@ -118,6 +118,14 @@ async def _prepare(rows: list[dict], need: int, log) -> tuple[list[dict], dict, 
             postings.save(url=url, company=company, role=role, text=fresh.description,
                           source=f"{fresh.ats}:{fresh.board_slug}")
         saved = postings.load(url)
+        if status == postings.UNKNOWN and not (saved and saved["text"]):
+            # Not on a board we can read (an employer's own careers site, LinkedIn): read
+            # the page itself.
+            async with sem:
+                text = await postings.read_page(url, role)
+            if text:
+                postings.save(url=url, company=company, role=role, text=text, source="page")
+                saved = postings.load(url)
         if saved and saved["text"]:
             return "ready", {"url": url, "company": company or saved["company"],
                              "role": role or saved["role"]}
