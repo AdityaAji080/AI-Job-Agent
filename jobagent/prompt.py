@@ -85,14 +85,20 @@ fit at a famous one, and say what makes the employer worth it in `why`.
    first. It may take up to {sg_slots} of the run's slots while India or Canada still have
    candidates waiting.
 2. **India and Canada together, as equals.** Alternate between them: about ten India
-   candidates, then about ten Canada candidates, until both pools are done.
-3. **Remote (unspecified) and Unknown**: pool only, no discovery.
-4. **United States**: pool only, no discovery, at most {max_us} recorded.
+   candidates, then about ten Canada candidates, until each has its share or you have
+   judged {release_after} of its candidates.
+3. **Spare slots.** Slots India or Canada didn't fill go back to the markets in priority
+   order: Singapore's pool again first, then India and Canada.
+4. **Remote (unspecified) and Unknown**: pool only, no discovery.
+5. **United States**: pool only, no discovery, at most {max_us} recorded.
 
 Each market has a share of the run's slots ({shares}). A market that has used its share
-takes more only once every market still under its share has no candidates left;
-`add_jobs` enforces this and names the market to judge next. The United States comes
-last on purpose: its listings are the easiest to find and would otherwise fill the run.
+takes more only once every market still under its share has had a fair look: either it
+has no candidates left, or {release_after} of its candidates have been judged (recorded or
+skipped) this run without filling its share. `add_jobs` enforces this and names the
+market to judge next. Judge from the top of each list: the best candidates come first, so
+{release_after} judged is a fair look. The United States comes last on purpose: its
+listings are the easiest to find and would otherwise fill the run.
 
 Judge the pools (A) in this order before any discovery: the run has few slots and they
 fill from the pools, while discovery uses none. Then discovery (B): Singapore first and
@@ -195,6 +201,11 @@ These listings did not come through the harvester, so verify them:
   summary.
 - Only record URLs you actually opened and saw the posting on. Never construct one, and
   never record one you couldn't open, even when you're sure it's the right address.
+- Pass the posting itself as `posting_text` when you record it: the responsibilities and
+  requirements as the page states them, copied rather than summarised, plus anything it
+  says about a cover letter. The CV for the job is tailored from this text; without it,
+  there may be no CV. Do the same for a pool candidate whose summary says it has no
+  description, once you have opened its page.
 
 ## Limits
 

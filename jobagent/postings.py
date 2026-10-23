@@ -188,6 +188,87 @@ async def check(url: str, company: str = "") -> tuple[str, Posting | None]:
     return UNKNOWN, None
 
 
+# ---------------------------------------------------------------- any other page
+
+PAGE_MIN_CHARS = 600  # less than this is a shell page (JavaScript-rendered) or an error page
+_LD_JSON = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S)
+_NOISE = re.compile(r"<(script|style|noscript|svg|nav|header|footer|form)\b.*?</\1\s*>", re.I | re.S)
+
+
+def _job_postings(data):
+    """Every schema.org JobPosting object in a parsed ld+json block."""
+    if isinstance(data, list):
+        for item in data:
+            yield from _job_postings(item)
+    elif isinstance(data, dict):
+        kind = data.get("@type")
+        if kind == "JobPosting" or (isinstance(kind, list) and "JobPosting" in kind):
+            yield data
+        for value in data.values():
+            if isinstance(value, (list, dict)):
+                yield from _job_postings(value)
+
+
+def page_text(html_doc: str, role: str = "") -> str:
+    """The posting's text from a careers page: its schema.org JobPosting description when
+    the page has one (most careers sites and LinkedIn do, for search engines), else the
+    page's visible text. Empty when neither looks like a posting."""
+    import json as _json
+    from .ats.base import html_to_text
+    best = ""
+    for block in _LD_JSON.findall(html_doc or ""):
+        try:
+            data = _json.loads(block.strip())
+        except ValueError:
+            continue
+        for jp in _job_postings(data):
+            parts = [jp.get(k) for k in ("description", "responsibilities", "qualifications",
+                                         "experienceRequirements", "skills") if isinstance(jp.get(k), str)]
+            text = html_to_text("\n\n".join(parts))
+            title = jp.get("title") if isinstance(jp.get("title"), str) else ""
+            if title and role and not _same_title(title, role):
+                continue  # another job on the same page ("similar roles")
+            if len(text) > len(best):
+                best = (f"{title}\n\n{text}" if title else text).strip()
+    if len(best) >= PAGE_MIN_CHARS:
+        return best
+    visible = html_to_text(_NOISE.sub(" ", html_doc or ""))
+    if len(visible) < PAGE_MIN_CHARS:
+        return ""
+    if role and not _same_title(visible, role):
+        return ""  # a page that never names the role is a listing or an error page
+    return visible
+
+
+def _same_title(text: str, role: str) -> bool:
+    """Most of the role's words appear in the text."""
+    words = [w for w in re.findall(r"[a-z0-9+#]+", role.lower()) if len(w) > 2]
+    if not words:
+        return True
+    hay = text.lower()
+    return sum(w in hay for w in words) >= max(1, (len(words) * 2 + 2) // 3)
+
+
+async def read_page(url: str, role: str = "", client=None) -> str:
+    """Fetch a careers page that isn't on a supported job board and return its posting
+    text, or "" when the page can't be read or doesn't show the role. Never raises."""
+    import httpx
+    own = client is None
+    client = client or httpx.AsyncClient(
+        timeout=config.HTTP_TIMEOUT, follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; job-agent/1.0)", "Accept": "text/html"})
+    try:
+        resp = await client.get(url)
+        if resp.status_code != 200 or "html" not in resp.headers.get("content-type", "html"):
+            return ""
+        return page_text(resp.text, role)
+    except Exception:
+        return ""
+    finally:
+        if own:
+            await client.aclose()
+
+
 async def refetch(url: str, company: str = "") -> Posting | None:
     """Re-read one posting from its job board. None when it can't be read or has closed."""
     status, posting = await check(url, company)
@@ -199,12 +280,17 @@ async def ensure(url: str, company: str = "", role: str = "") -> dict | None:
     have = load(url)
     if have and have["text"]:
         return have
-    p = await refetch(url, company)
-    if not p or not p.description:
-        return None
-    save(url=url, company=company or p.company, role=role or p.title, text=p.description,
-         source=f"{p.ats}:{p.board_slug}")
-    return load(url)
+    status, p = await check(url, company)
+    if status == OPEN and p and p.description:
+        save(url=url, company=company or p.company, role=role or p.title, text=p.description,
+             source=f"{p.ats}:{p.board_slug}")
+        return load(url)
+    if status == UNKNOWN:  # not on a board we can read: try the page itself
+        text = await read_page(url, role)
+        if text:
+            save(url=url, company=company, role=role, text=text, source="page")
+            return load(url)
+    return None
 
 
 def _main() -> int:
