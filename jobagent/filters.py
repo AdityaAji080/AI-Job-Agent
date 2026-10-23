@@ -21,6 +21,11 @@ def market_of(location: str, remote: bool | None = None) -> str:
     for name, pattern in config.MARKETS:
         if pattern.search(loc):
             return name
+    code = config.US_STATE_CODE.search(loc)
+    if code:
+        foreign = (code.group(1).lower() in config.COUNTRY_LIKE_STATE_CODES
+                   and config.OTHER_PLACES.search(loc))
+        return "Other" if foreign else "United States"
     if config.OTHER_PLACES.search(loc):
         return "Other"
     if remote or config.REMOTE.search(loc):
