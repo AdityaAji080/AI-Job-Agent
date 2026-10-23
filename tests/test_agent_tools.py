@@ -214,7 +214,8 @@ def test_system_prompt_formats_with_freshness_settings():
     text = SYSTEM_PROMPT.format(today="2026-10-22", resume="r", criteria="c", max_us=1, max_new=5,
                                 max_company=2, fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
                                 sg_slots=3, shares="Singapore 3, India 1, Canada 1", cooldown_days=14,
-                                large_postings=150, crowded_applicants=100, max_crowded=2)
+                                large_postings=150, crowded_applicants=100, max_crowded=2,
+                                release_after=15)
     assert f"up to {config.FRESH_DAYS} days old" in text and "{" not in text
     flat = " ".join(text.split())
     assert "last 14 days is held back" in flat and "at most 2 can be recorded per run" in flat

@@ -113,6 +113,10 @@ class Run:
         return Counter(c.market for c in self.open_candidates())
 
 
+# Shorter than this is a summary or a fragment, not a posting a CV can be tailored from.
+MIN_POSTING_TEXT = 300
+
+
 def kickoff_start() -> str:
     """Where the run begins: the first market in priority order (Singapore), the same
     order the system prompt gives."""
@@ -147,6 +151,11 @@ ADD_JOBS_SCHEMA = {
             "url": {"type": "string", "description": "Direct link to the posting; only URLs you opened "
                                                      "or that came from the pool"},
             "why": {"type": "string", "description": "One sentence on why this fits, naming any gap"},
+            "posting_text": {"type": "string", "description":
+                             "Only for a job without candidate_id (or a pool candidate that had no "
+                             "description): the posting as you read it, copied rather than "
+                             "summarised: responsibilities, requirements, and anything it says "
+                             "about a cover letter. The CV for this job is tailored from it."},
         },
         "required": ["why"],
     }}},
@@ -210,17 +219,24 @@ def build_tools(run: Run):
 
         crowded_used = run.recorded_crowded
 
+        def judged(market: str) -> int:
+            return run.skipped[market] + run.recorded_by_market[market]
+
         def still_waiting(market: str) -> bool:
-            """Open candidates this run could still record: not in this call, not from a
+            """The market has had less than a fair look (MARKET_RELEASE_AFTER judged) and has
+            open candidates this run could still record: not in this call, not from a
             company that has used up its slots, and not crowded once crowded ones are
             used up (those wait for a later run)."""
+            if judged(market) >= config.MARKET_RELEASE_AFTER:
+                return False
             return any(c2.id not in batch_ids
                        and company_used[store.company_key(c2.company)] < config.MAX_PER_COMPANY
                        and not (c2.crowded and crowded_used >= config.MAX_CROWDED_PER_RUN)
                        for c2 in run.open_candidates(market))
-        jobs, refused = [], []
+        jobs, refused, no_text = [], [], []
         for job in args.get("jobs") or []:
             cid = job.pop("candidate_id", "") or ""
+            given_text = (job.pop("posting_text", "") or "").strip()
             c = run.pool.get(cid)
             if c:
                 defaults = {"company": c.company, "role": c.title, "location": c.location,
@@ -252,10 +268,13 @@ def build_tools(run: Run):
                 waiting = [m for m in slots if m != market and market_used[m] < slots[m]
                            and still_waiting(m)]
                 if waiting:
+                    more = ", ".join(f"{m} {config.MARKET_RELEASE_AFTER - judged(m)}" for m in waiting)
                     refused.append({"role": job.get("role"),
                                     "reason": f"{market} has its share ({slots[market]}) while "
                                               f"{' and '.join(waiting)} still has candidates; judge "
-                                              f"{waiting[0]} next and leave this one undecided"})
+                                              f"{waiting[0]} next and leave this one undecided. Its "
+                                              f"spare slots open up after more judged there "
+                                              f"(still to judge: {more})"})
                     continue
             company = store.company_key(job["company"])
             since = run.cooling_since(job["company"])
@@ -289,9 +308,16 @@ def build_tools(run: Run):
             jobs.append(job)
             if c:
                 run.decided.add(cid)  # only once accepted; refused ones stay for next run
-                # Keep the text the decision was made on; tailoring reads it later.
+            # Keep the text the decision was made on; tailoring reads it later. The board's
+            # own text when there is one, else what the agent read on the page.
+            if c and c.description:
                 postings.save(url=job["url"], company=job["company"], role=job["role"],
                               text=c.description, source=c.board_key)
+            elif len(given_text) >= MIN_POSTING_TEXT:
+                postings.save(url=job["url"], company=job["company"], role=job["role"],
+                              text=given_text, source="agent")
+            else:
+                no_text.append(job["role"])
         result = store.append_jobs(jobs)
         added_urls = {store.job_key(j["url"]) for j in store.read_jobs()[-result["added"]:]} \
             if result["added"] else set()
@@ -304,6 +330,10 @@ def build_tools(run: Run):
                     run.registry.record_recorded(job["_board"])
         run.recorded += result["added"]
         result["rejected"] = result["rejected"] + refused
+        if no_text:
+            result["note"] = (f"No posting_text for: {', '.join(no_text)}. The CV step will try to "
+                              "read the page itself; if it can't, no CV is made. Pass posting_text "
+                              "next time.")
         result["recorded_this_run"] = run.recorded
         result["remaining_slots"] = max(0, config.MAX_NEW_JOBS - run.recorded)
         result["remaining_us_slots"] = max(0, min(result["remaining_slots"],
@@ -532,7 +562,7 @@ async def main() -> int:
         fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
         cooldown_days=config.COMPANY_COOLDOWN_DAYS, large_postings=config.LARGE_EMPLOYER_POSTINGS,
         crowded_applicants=config.CROWDED_APPLICANTS, max_crowded=config.MAX_CROWDED_PER_RUN,
-        sg_slots=config.market_slots().get("Singapore", 0),
+        sg_slots=config.market_slots().get("Singapore", 0), release_after=config.MARKET_RELEASE_AFTER,
         shares=", ".join(f"{m} {n}" for m, n in config.market_slots().items()),
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))
