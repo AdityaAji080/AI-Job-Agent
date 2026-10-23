@@ -61,6 +61,7 @@ jobs:
           URLS: ${{ inputs.urls }}
           MAX: ${{ inputs.max }}
           LETTER: ${{ inputs.letter }}
+          COVER_LETTERS: ${{ vars.COVER_LETTERS || 'unless_declined' }}
         run: |
           set -f  # no filename expansion of the URLs
           if [ -n "$URLS" ]; then

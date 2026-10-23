@@ -22,6 +22,11 @@ def setup_run(tmp_path, monkeypatch, n=3):
     for attr, fname in [("JOBS_CSV", "jobs.csv"), ("SEEN_CSV", "seen.csv"), ("BOARDS_CSV", "boards.csv")]:
         monkeypatch.setattr(config, attr, tmp_path / fname)
     monkeypatch.setattr(config, "MAX_NEW_JOBS", 2)
+    monkeypatch.setattr(config, "MAX_PER_COMPANY", 3)
+    monkeypatch.setattr(config, "COMPANY_COOLDOWN_DAYS", 14)
+    monkeypatch.setattr(config, "MAX_CROWDED_PER_RUN", 2)
+    monkeypatch.setattr(config, "LARGE_EMPLOYER_POSTINGS", 150)
+    monkeypatch.setattr(config, "CROWDED_APPLICANTS", 100)
     board = Board("lever", "acme", "Acme")
     reg = Registry([])
     reg.add(board, "Acme", source="seed")
@@ -208,5 +213,85 @@ def test_system_prompt_formats_with_freshness_settings():
     from jobagent.prompt import SYSTEM_PROMPT
     text = SYSTEM_PROMPT.format(today="2026-10-22", resume="r", criteria="c", max_us=1, max_new=5,
                                 max_company=2, fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
-                                sg_slots=3, shares="Singapore 3, India 1, Canada 1")
+                                sg_slots=3, shares="Singapore 3, India 1, Canada 1", cooldown_days=14,
+                                large_postings=150, crowded_applicants=100, max_crowded=2)
     assert f"up to {config.FRESH_DAYS} days old" in text and "{" not in text
+    flat = " ".join(text.split())
+    assert "last 14 days is held back" in flat and "at most 2 can be recorded per run" in flat
+    # A link the agent couldn't open is never recorded (the Dyson case).
+    assert "Never record a link you couldn't open" in flat and "never record one you couldn't open" in flat
+    assert "Aim discovery at employers most applicants never think of" in flat
+
+
+# ---------------------------------------------------------------- many employers, few crowds
+
+def _board_pool(run, board, specs, postings=None, applicants=None):
+    """specs: (company, title, location). `postings` is the board's total open roles."""
+    from jobagent.harvest import BoardResult, to_candidate
+    posts = [Posting(board.ats, board.slug, comp, f"{board.slug}{i}", title, f"https://x.com/{board.slug}/{i}",
+                     location=loc, description="Build things.",
+                     extra={"applicants": applicants} if applicants is not None else {})
+             for i, (comp, title, loc) in enumerate(specs)]
+    run.absorb([BoardResult(board, ok=True, postings=postings or len(posts),
+                            candidates=[to_candidate(p, board) for p in posts])])
+
+
+def test_a_company_recorded_recently_is_held_back(tmp_path, monkeypatch):
+    from datetime import date, timedelta
+    _, _ = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 5)
+    recent = (date.today() - timedelta(days=3)).isoformat()
+    old = (date.today() - timedelta(days=20)).isoformat()
+    store.mark_seen([{"url": "https://a.com/1", "decision": "recorded", "company": "Grab Holdings Pte Ltd"},
+                     {"url": "https://b.com/1", "decision": "recorded", "company": "Stripe"}])
+    rows = config.SEEN_CSV.read_text().replace(date.today().isoformat(), recent, 1)
+    config.SEEN_CSV.write_text(rows.replace(date.today().isoformat(), old, 1))
+    run = agent.Run(run_registry := agent.Registry([]))
+    tools = agent.build_tools(run)
+    _board_pool(run, Board("lever", "grab"), [("Grab", "ML Engineer", "Singapore")])
+    _board_pool(run, Board("lever", "stripe"), [("Stripe", "ML Engineer", "Singapore")])
+    # Grab (3 days ago) is out of the pool; Stripe (20 days ago) is back.
+    assert [c.company for c in run.open_candidates()] == ["Stripe"]
+    assert run.held_back == {"Grab": 1} and "Held back" in agent.harvest_summary(run)
+    res = call(tools, "add_jobs", {"jobs": [{"company": "Grab", "role": "AI Engineer", "location": "Singapore",
+                                             "url": "https://grab.careers/1", "why": "x"}]})
+    assert res["added"] == 0 and "held back for 14 days" in res["rejected"][0]["reason"]
+
+
+def test_crowded_postings_rank_last_and_are_capped(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 10)
+    monkeypatch.setattr(config, "MAX_PER_COMPANY", 10)
+    _board_pool(run, Board("lever", "big"), [(f"BigCo", f"ML Engineer {i}", "Singapore") for i in range(3)],
+                postings=900)
+    _board_pool(run, Board("lever", "small"), [("SmallCo", "ML Engineer", "Singapore")], postings=12)
+    _board_pool(run, Board("mycareersfuture", "sg"), [("Popular Pte Ltd", "AI Engineer", "Singapore")],
+                applicants=250)
+    order = run.open_candidates("Singapore")
+    assert order[0].company == "SmallCo" and not order[0].crowded
+    assert {c.crowded for c in order[1:]} == {"large employer (900 open roles)", "250 applicants so far"}
+    assert "large employer" in order[1].summary()["crowded"]
+    res = call(tools, "add_jobs", {"jobs": [{"candidate_id": c.id, "why": "x"} for c in order]})
+    assert res["added"] == 3  # SmallCo plus two crowded
+    assert sum("crowded posting" in r["reason"] for r in res["rejected"]) == 2
+    assert run.recorded_crowded == 2
+
+
+def test_a_mcf_ad_from_a_large_employer_counts_as_crowded(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    _board_pool(run, Board("mycareersfuture", "sg"), [("GRAB TAXI HOLDINGS PTE. LTD.", "AI Engineer", "Singapore")])
+    _board_pool(run, Board("smartrecruiters", "grab"), [("Grab Taxi Holdings", "Data Engineer", "Singapore")],
+                postings=441)
+    mcf = next(c for c in run.open_candidates() if c.board_key.startswith("mycareersfuture"))
+    assert mcf.crowded == "large employer (441 open roles)"
+
+
+def test_spare_slots_skip_a_market_left_with_only_crowded_candidates(tmp_path, monkeypatch):
+    run, tools = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "MAX_NEW_JOBS", 5)  # Singapore 3, India 1, Canada 1
+    monkeypatch.setattr(config, "MAX_CROWDED_PER_RUN", 0)
+    _board_pool(run, Board("lever", "big"), [("BigCo", "ML Engineer", "Singapore")], postings=900)
+    _board_pool(run, Board("lever", "in"), [(f"In{i}", "ML Engineer", "Bengaluru") for i in range(3)])
+    india = [c.id for c in run.open_candidates("India")]
+    # Singapore's only candidate is crowded and the cap is 0, so India may take the spare slots.
+    assert call(tools, "add_jobs", {"jobs": [{"candidate_id": i, "why": "x"} for i in india]})["added"] == 3

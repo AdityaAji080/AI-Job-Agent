@@ -65,7 +65,7 @@ CV_SCHEMA = _obj({
              "description": "Main posting requirements the source can't support"},
 })
 
-LETTER_DECISIONS = ("required", "invited", "not_needed")
+LETTER_DECISIONS = ("required", "invited", "not_mentioned", "declined")
 # The first draft also decides whether the application needs a cover letter, so the
 # decision costs no extra request. Revisions and repairs return the plain CV_SCHEMA.
 DRAFT_SCHEMA = {**CV_SCHEMA, "properties": {**CV_SCHEMA["properties"], "cover_letter": _obj({

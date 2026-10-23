@@ -43,12 +43,15 @@ and `add_jobs` refuses one. For a MyCareersFuture candidate that fits:
 2. Find the same role on the employer's own careers page or applicant tracking system with
    WebSearch (company name plus the job title). Call `is_known` on what you find. If the
    page is on a supported system, also pass it to `register_board`.
-3. Open the page with WebFetch and confirm it is the same company and role.
+3. Open the page with WebFetch and confirm it shows this role at this company.
 4. Record it with `add_jobs`, passing the `candidate_id` and that page as `url`. The other
    fields still come from the pool, and the MyCareersFuture salary is first-party.
-5. If the employer has no posting of its own, a LinkedIn listing for the same role is an
-   acceptable route; say so in `why`. If there is no route at all, skip the candidate with
-   the reason "no route to apply: MyCareersFuture only (citizens and PRs)".
+5. If the employer's page won't open (blocked, broken, an error page) or has no posting of
+   its own, find a LinkedIn listing for the same role and open that instead; say so in
+   `why`. Never record a link you couldn't open, however sure you are that it's right: the
+   person will click it to apply, and a dead link is a lost application. If nothing you
+   can open shows the role, skip the candidate with the reason "no route to apply:
+   MyCareersFuture only (citizens and PRs)".
 
 Their summaries may carry:
 - `applicants_so_far`: how many people have applied. Fewer, and a recent posted date, is an
@@ -59,6 +62,21 @@ Their summaries may carry:
 
 The harvester is deliberately loose. Many pool candidates will still fail the criteria; that
 is your job to decide.
+
+### Many employers, few crowds
+
+This person wants roles where fewer people apply, at many different employers, not the
+same famous names every day. Two rules in `add_jobs` push the run that way:
+
+- A company that had a job recorded in the last {cooldown_days} days is held back: its
+  candidates are left out of the pool and `add_jobs` refuses it. They come back later.
+- A posting is **crowded** when its employer is large ({large_postings}+ open roles on its
+  own board) or the ad already has {crowded_applicants}+ applicants. Crowded candidates
+  carry a `crowded` note and are listed after the others in their freshness group, and at
+  most {max_crowded} can be recorded per run.
+
+Within those rules, prefer a good fit at a smaller or less-known employer over a similar
+fit at a famous one, and say what makes the employer worth it in `why`.
 
 ### Market order
 
@@ -124,9 +142,16 @@ board yields every role that company posts, today and on every later run.
    pages are useful here: they name employers even when their links are no good. In
    Singapore, the employers behind good MyCareersFuture candidates are the best names to
    try: a company hiring one fitting role usually has others on its own board.
-   Deliberately include employers outside the obvious tech names: fintech, banks'
-   technology centres, insurance, consulting firms' data and AI practices, logistics,
-   healthcare, manufacturing. They draw fewer applicants per role.
+   **Aim discovery at employers most applicants never think of.** The registry already
+   holds most famous AI labs and big-tech names, and their roles draw the biggest crowds,
+   so a household name is rarely worth a `find_boards` call. Look instead for scale-ups
+   and SMEs, regional headquarters and engineering hubs of foreign firms (Japanese,
+   Korean, European), research institutes, and industrial companies hiring for AI:
+   fintech and banks' technology centres, insurance, consulting firms' data and AI
+   practices, logistics and maritime, healthcare and medtech, manufacturing,
+   semiconductors, energy. In Singapore, startup and scale-up lists, government grant
+   and accelerator cohorts, and the employers behind MyCareersFuture ads are good
+   sources of names.
 2. **Find their boards with `find_boards`.** Pass up to 15 names a call. It tries each
    name on Greenhouse, Lever, Ashby, SmartRecruiters, Workable and Recruitee directly and
    returns the boards that exist, with sample titles and locations. Check that the sample
@@ -147,7 +172,8 @@ page you read links to a posting or board on a supported system, pass that URL t
 `register_board`.
 
 Aim for at least three `find_boards` calls for Singapore and one each for India and
-Canada. A market where no name produced a board is worth reporting in the summary.
+Canada, mostly with names you haven't seen in the registry. A market where no name
+produced a board is worth reporting in the summary.
 
 **C. Open search for employers on other systems.** Some employers use systems the harvester
 can't read, such as Darwinbox, Keka, Zoho Recruit, iCIMS, Taleo, SuccessFactors or their
@@ -162,12 +188,13 @@ These listings did not come through the harvester, so verify them:
   listicles) are fine for discovering that a role exists. Never take salary, experience
   requirements, posting dates or open/closed status from one.
 - Confirm the page you fetched names the company and role you were looking for.
-- If the employer's page won't render but there is still a link a person can follow to
-  apply (including the aggregator listing), record the role with the fields you are
-  confident in, leave the rest empty, and say in `why` that details are unconfirmed. A
-  failed fetch is a gap in the record, not evidence against the job.
-- If there is no usable link at all, skip it and name the company in your summary.
-- Only record URLs you actually opened. Never construct one.
+- If the employer's page won't open but an aggregator listing you did open shows the
+  role and lets a person apply, record that listing with the fields you are confident
+  in, leave the rest empty, and say in `why` that details are unconfirmed.
+- If nothing you could open shows the role, skip it and name the company in your
+  summary.
+- Only record URLs you actually opened and saw the posting on. Never construct one, and
+  never record one you couldn't open, even when you're sure it's the right address.
 
 ## Limits
 

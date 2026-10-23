@@ -63,7 +63,11 @@ jobs:
           MAX_BUDGET_USD: ${{ vars.MAX_BUDGET_USD || '2.00' }}
           MAX_NEW_JOBS: ${{ vars.MAX_NEW_JOBS || '6' }}
           MAX_US_JOBS: ${{ vars.MAX_US_JOBS || '1' }}
-          MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '2' }}
+          MAX_PER_COMPANY: ${{ vars.MAX_PER_COMPANY || '1' }}
+          COMPANY_COOLDOWN_DAYS: ${{ vars.COMPANY_COOLDOWN_DAYS || '14' }}
+          LARGE_EMPLOYER_POSTINGS: ${{ vars.LARGE_EMPLOYER_POSTINGS || '150' }}
+          CROWDED_APPLICANTS: ${{ vars.CROWDED_APPLICANTS || '100' }}
+          MAX_CROWDED_PER_RUN: ${{ vars.MAX_CROWDED_PER_RUN || '2' }}
           MARKET_SHARES: ${{ vars.MARKET_SHARES || '' }}
           JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
@@ -117,6 +121,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MAX_TAILOR: ${{ vars.MAX_TAILOR || '40' }}
+          COVER_LETTERS: ${{ vars.COVER_LETTERS || 'unless_declined' }}
         run: python -m jobagent.cv batch --max "$MAX_TAILOR" --deadline-minutes 300
 
       - name: Save to the data repository

@@ -22,7 +22,7 @@ from .ats import detect_board, unsupported_system
 from .ats import mycareersfuture as mcf
 from .ats.base import make_client
 from .discover import probe
-from .harvest import Candidate, BoardResult, harvest, harvest_board, rank
+from .harvest import Candidate, BoardResult, crowd_reason, harvest, harvest_board, rank
 from .prompt import KICKOFF, SYSTEM_PROMPT
 from .registry import Registry
 
@@ -43,6 +43,30 @@ class Run:
         self.board_results: list[BoardResult] = []
         self.probed = 0
         self.harvest_text = ""  # snapshot of the harvest, taken before the model starts
+        # Companies recorded recently are held back so others get the slots.
+        self.cooling = store.recently_recorded(config.COMPANY_COOLDOWN_DAYS)
+        self.held_back = Counter()  # company -> candidates left out because of the cooldown
+        self.recorded_crowded = 0
+        # company name -> open roles on the company's own board, from the registry's last check.
+        self.board_sizes: dict[str, int] = {}
+        for e in registry.entries.values():
+            if e.ats != "mycareersfuture":
+                self._note_size(e.company, int(e.postings or 0))
+
+    def _note_size(self, company: str, postings: int) -> None:
+        if store.company_key(company):
+            self.board_sizes[company] = max(postings, self.board_sizes.get(company, 0))
+
+    def crowd(self, company: str, applicants: int | None = None) -> str:
+        """Why a posting at this company draws a crowd, or ""."""
+        size = max((n for name, n in self.board_sizes.items() if store.same_employer(name, company)),
+                   default=None)
+        return crowd_reason(size, applicants)
+
+    def cooling_since(self, company: str) -> str:
+        """The date this employer last had a job recorded, if inside the cooldown, else ""."""
+        return max((when for name, when in self.cooling.items() if store.same_employer(name, company)),
+                   default="")
 
     def absorb(self, results: list[BoardResult]) -> None:
         """Add harvested candidates, keeping one copy of a job listed in several places.
@@ -51,6 +75,11 @@ class Run:
         version (fuller detail); a role already in the tracker is dropped.
         """
         tracked = store.tracked_role_keys()
+        for r in results:  # board sizes first, so a MyCareersFuture ad knows its employer's
+            if r.ok and r.board.ats != "mycareersfuture":
+                for c in r.candidates[:1]:
+                    self._note_size(c.company, r.postings)
+                self._note_size(r.board.company, r.postings)
         for r in results:
             self.board_results.append(r)
             self.registry.record_check(r.board.key, ok=r.ok, status=r.error,
@@ -58,6 +87,9 @@ class Run:
             for c in r.candidates:
                 rk = store.role_key(c.company, c.title) + "|" + c.market
                 if rk in tracked or c.id in self.pool:
+                    continue
+                if self.cooling_since(c.company):
+                    self.held_back[c.company] += 1
                     continue
                 other = self.by_role.get(rk)
                 if other and other in self.pool:
@@ -68,6 +100,10 @@ class Run:
                         continue
                 self.pool[c.id] = c
                 self.by_role[rk] = c.id
+        # Tag after every board is in: a board read later (or registered mid-run) can make
+        # an earlier MyCareersFuture ad from the same employer crowded.
+        for c in self.pool.values():
+            c.crowded = self.crowd(c.company, c.applicants)
 
     def open_candidates(self, market: str = "") -> list[Candidate]:
         return rank([c for c in self.pool.values() if c.id not in self.decided
@@ -166,11 +202,15 @@ def build_tools(run: Run):
         slots = config.market_slots()
         batch_ids = {j.get("candidate_id") for j in args.get("jobs") or []}
 
+        crowded_used = run.recorded_crowded
+
         def still_waiting(market: str) -> bool:
-            """Open candidates this run could still record: not in this call, and not
-            from a company that has used up its slots (those wait for a later run)."""
+            """Open candidates this run could still record: not in this call, not from a
+            company that has used up its slots, and not crowded once crowded ones are
+            used up (those wait for a later run)."""
             return any(c2.id not in batch_ids
                        and company_used[store.company_key(c2.company)] < config.MAX_PER_COMPANY
+                       and not (c2.crowded and crowded_used >= config.MAX_CROWDED_PER_RUN)
                        for c2 in run.open_candidates(market))
         jobs, refused = [], []
         for job in args.get("jobs") or []:
@@ -212,6 +252,20 @@ def build_tools(run: Run):
                                               f"{waiting[0]} next and leave this one undecided"})
                     continue
             company = store.company_key(job["company"])
+            since = run.cooling_since(job["company"])
+            if since:
+                refused.append({"role": job.get("role"),
+                                "reason": f"{job['company']} had a job recorded on {since}; "
+                                          f"companies are held back for {config.COMPANY_COOLDOWN_DAYS} "
+                                          "days so others get the slots. Leave it for a later run"})
+                continue
+            crowded = (c.crowded if c else "") or run.crowd(job["company"])
+            if crowded and crowded_used >= config.MAX_CROWDED_PER_RUN:
+                refused.append({"role": job.get("role"),
+                                "reason": f"crowded posting ({crowded}), and this run already has "
+                                          f"{config.MAX_CROWDED_PER_RUN}. Leave it undecided and "
+                                          "look for a less contested employer"})
+                continue
             if company_used[company] >= config.MAX_PER_COMPANY:
                 refused.append({"role": job.get("role"),
                                 "reason": f"{job['company']} already has {config.MAX_PER_COMPANY} this run; "
@@ -219,6 +273,9 @@ def build_tools(run: Run):
                 continue
             if market == "United States":
                 us_room -= 1
+            if crowded:
+                crowded_used += 1
+            job["_crowded"] = bool(crowded)
             company_used[company] += 1
             market_used[job["market"]] += 1
             job["_company"] = company
@@ -236,6 +293,7 @@ def build_tools(run: Run):
             if store.job_key(job["url"]) in added_urls:
                 run.recorded_by_market[job["market"]] += 1
                 run.recorded_by_company[job["_company"]] += 1
+                run.recorded_crowded += job["_crowded"]
                 if job["_board"]:
                     run.registry.record_recorded(job["_board"])
         run.recorded += result["added"]
@@ -326,6 +384,14 @@ def harvest_summary(run: Run) -> str:
     for r in ok:
         for reason, n in r.dropped.items():
             lines.append(f"- Dropped from {r.board.company or r.board.slug}: {n} ({reason}).")
+    if run.held_back:
+        lines.append(f"- Held back (a job recorded in the last {config.COMPANY_COOLDOWN_DAYS} days): "
+                     f"{sum(run.held_back.values())} candidates from "
+                     + ", ".join(sorted(run.held_back)) + ".")
+    crowded = sum(1 for c in run.open_candidates() if c.crowded)
+    if crowded:
+        lines.append(f"- Crowded candidates (large employers or many applicants): {crowded}; "
+                     f"at most {config.MAX_CROWDED_PER_RUN} can be recorded this run.")
     for r in failed:
         lines.append(f"- Board failed: {r.board.company or r.board.slug} ({r.board.ats}): {r.error}")
     if not run.board_results:
@@ -416,6 +482,8 @@ async def main() -> int:
         today=date.today().isoformat(), max_new=config.MAX_NEW_JOBS, max_us=config.MAX_US_JOBS,
         max_company=config.MAX_PER_COMPANY,
         fresh_days=config.FRESH_DAYS, old_days=config.OLD_DAYS,
+        cooldown_days=config.COMPANY_COOLDOWN_DAYS, large_postings=config.LARGE_EMPLOYER_POSTINGS,
+        crowded_applicants=config.CROWDED_APPLICANTS, max_crowded=config.MAX_CROWDED_PER_RUN,
         sg_slots=config.market_slots().get("Singapore", 0),
         shares=", ".join(f"{m} {n}" for m, n in config.market_slots().items()),
         resume=config.RESUME_PATH.read_text(encoding="utf-8"),

@@ -41,6 +41,7 @@ class Candidate:
     note: str = ""
     fit: int = 0
     fit_terms: list[str] = field(default_factory=list)
+    crowded: str = ""  # why it draws many applicants (large employer, applicant count), or ""
 
     def summary(self) -> dict:
         """The compact view the model scans; get_posting returns the full text."""
@@ -64,6 +65,8 @@ class Candidate:
             out["applicants_so_far"] = self.applicants
         if self.note:
             out["note"] = self.note
+        if self.crowded:
+            out["crowded"] = self.crowded
         if self.board_key.startswith("mycareersfuture:"):
             out["apply_via"] = "employer's own posting needed; MyCareersFuture is citizens and PRs only"
         if self.looks_stale:
@@ -170,8 +173,18 @@ def _by_fit(group: list[Candidate]) -> list[Candidate]:
     return sorted(group, key=lambda c: (-(min(c.fit, 15) // 4), _age(c)))
 
 
+def crowd_reason(postings_on_board: int | None, applicants: int | None) -> str:
+    """Why a posting draws a crowd, or "" if it doesn't."""
+    if applicants is not None and applicants >= config.CROWDED_APPLICANTS:
+        return f"{applicants} applicants so far"
+    if postings_on_board and postings_on_board >= config.LARGE_EMPLOYER_POSTINGS:
+        return f"large employer ({postings_on_board} open roles)"
+    return ""
+
+
 def rank(candidates: list[Candidate]) -> list[Candidate]:
     """Market priority first, then freshness: fresh postings, then recent, then old.
+    Within each, crowded postings (large employers, many applicants) come after the rest.
 
     Fresh postings are ordered best fit to the profile first: they are all new, and
     an early application is worth most there. Recent ones alternate between the best fit
@@ -180,7 +193,7 @@ def rank(candidates: list[Candidate]) -> list[Candidate]:
     """
     groups: dict[tuple, list[Candidate]] = {}
     for c in candidates:
-        groups.setdefault((filters.market_rank(c.market), freshness(c)), []).append(c)
+        groups.setdefault((filters.market_rank(c.market), freshness(c), bool(c.crowded)), []).append(c)
     out: list[Candidate] = []
     for key in sorted(groups):
         group = groups[key]

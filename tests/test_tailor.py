@@ -374,14 +374,29 @@ def test_stock_phrases_are_warned_about_not_blocked():
     assert {p.level for p in found if "stock phrase" in p.message} == {"warn"}
 
 
-def test_letter_column(data):
+def test_letter_column(data, monkeypatch):
     from jobagent.cv.tailor import letter_column
     pdf = config.DATA_DIR / "applications" / "x" / "Jane_Example_Cover_Letter.pdf"
     assert letter_column(WANTS, pdf) == "applications/x/Jane_Example_Cover_Letter.pdf"
     assert letter_column(WANTS, None, "letter checks still failing") == "failed: letter checks still failing"
-    assert letter_column({"decision": "not_needed", "reason": "no mention of one"}, None) == \
-        "not needed: no mention of one"
-    assert letter_column(None, None) == "" and letter_column({"decision": "not_needed"}, None, forced=True) == ""
+    assert letter_column({"decision": "declined", "reason": "says no cover letters"}, None) == \
+        "not wanted: says no cover letters"
+    assert letter_column(None, None) == "" and letter_column({"decision": "declined"}, None, forced=True) == ""
+    monkeypatch.setattr(config, "COVER_LETTERS", "when_asked")
+    assert letter_column({"decision": "not_mentioned", "reason": "no mention"}, None) == "not needed: no mention"
+
+
+@pytest.mark.parametrize("mode,stance,expected", [
+    ("unless_declined", "required", True), ("unless_declined", "invited", True),
+    ("unless_declined", "not_mentioned", True), ("unless_declined", "declined", False),
+    ("when_asked", "required", True), ("when_asked", "invited", True),
+    ("when_asked", "not_mentioned", False), ("when_asked", "declined", False),
+])
+def test_which_postings_get_a_letter(monkeypatch, mode, stance, expected):
+    from jobagent.cv import letter
+    monkeypatch.setattr(config, "COVER_LETTERS", mode)
+    assert letter.wanted({"decision": stance, "reason": "x"}) is expected
+    assert letter.wanted(None) is False
 
 
 @needs_latex
@@ -402,16 +417,26 @@ def test_tailor_writes_a_letter_when_the_posting_asks(data):
 
 
 @needs_latex
-def test_no_letter_when_not_needed_unless_forced(data):
-    not_needed = {"decision": "not_needed", "reason": "no mention of a cover letter"}
-    client = Client(research=[text_reply("- x")], cvs=[draft_with(not_needed)], reviews=[READY])
+def test_no_letter_when_the_posting_declines_one_unless_forced(data):
+    declined = {"decision": "declined", "reason": "asks applicants not to send cover letters"}
+    client = Client(research=[text_reply("- x")], cvs=[draft_with(declined)], reviews=[READY])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
     assert result.ok and result.letter_pdf is None and "letter" not in client.kinds()
-    assert result.letter_note == "not needed: no mention of a cover letter"
+    assert result.letter_note == "not wanted: asks applicants not to send cover letters"
 
-    client = Client(cvs=[draft_with(not_needed)], reviews=[READY], letters=[LETTER], letter_reviews=[READY])
+    client = Client(cvs=[draft_with(declined)], reviews=[READY], letters=[LETTER], letter_reviews=[READY])
     result = tailor(client, SOURCE, POSTING, log=lambda *_: None, force_letter=True)
     assert result.letter_pdf is not None and "requested by hand" in client.requests[2]["messages"][0]["content"]
+
+
+@needs_latex
+def test_a_posting_silent_on_letters_still_gets_one_for_the_form(data):
+    silent = {"decision": "not_mentioned", "reason": "Posting does not mention a cover letter"}
+    client = Client(research=[text_reply("- x")], cvs=[draft_with(silent)], reviews=[READY],
+                    letters=[LETTER], letter_reviews=[READY])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert result.ok and result.letter_pdf is not None
+    assert "application form's cover letter field" in client.requests[3]["messages"][0]["content"]
 
 
 @needs_latex

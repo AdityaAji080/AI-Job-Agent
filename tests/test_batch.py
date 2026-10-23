@@ -299,18 +299,21 @@ def test_letters_follow_the_finished_cv_only_where_wanted(data):
     save_notes("Acme", "- cached")
     asks = track(1)
     silent = track(2)
-    not_needed = {"decision": "not_needed", "reason": "no mention of one"}
-    client = Client({"draft": lambda u: wants_letter_cv() if u == asks else good_cv(cover_letter=not_needed),
+    declines = track(3)
+    stances = {asks: WANTS, silent: {"decision": "not_mentioned", "reason": "no mention of one"},
+               declines: {"decision": "declined", "reason": "no cover letters, please"}}
+    client = Client({"draft": lambda u: good_cv(cover_letter=stances[u]),
                      "critique": lambda u: READY, "letter": lambda u: LETTER,
                      "letter_review": lambda u: READY})
     summary = run(client)
-    assert summary["tailored"] == 2 and summary["letters"] == 1
+    assert summary["tailored"] == 3 and summary["letters"] == 2
     assert client.stages == [["draft"], ["critique"], ["letter"], ["letter_review"]]
     batch.apply_updates()
     rows = {j["url"]: j for j in store.read_jobs()}
-    assert rows[asks]["cover_letter"].endswith("/Jane_Example_Cover_Letter.pdf")
-    assert (config.DATA_DIR / rows[asks]["cover_letter"]).exists()
-    assert rows[silent]["cover_letter"] == "not needed: no mention of one"
+    for url in (asks, silent):
+        assert rows[url]["cover_letter"].endswith("/Jane_Example_Cover_Letter.pdf")
+        assert (config.DATA_DIR / rows[url]["cover_letter"]).exists()
+    assert rows[declines]["cover_letter"] == "not wanted: no cover letters, please"
     rec = json.loads((config.DATA_DIR / rows[asks]["cv"]).with_name("review.json").read_text())
     assert rec["cover_letter"]["final"] == LETTER and "letter" in [s["step"] for s in rec["steps"]]
 
