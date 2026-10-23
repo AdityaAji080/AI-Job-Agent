@@ -1,4 +1,4 @@
-# job-agent
+# AI Job Agent
 
 A scheduled job-search agent that reads company job boards directly, has Claude judge
 each opening against a written set of criteria, keeps a deduplicated tracker that grows a
