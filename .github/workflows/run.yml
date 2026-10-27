@@ -124,7 +124,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MAX_TAILOR: ${{ vars.MAX_TAILOR || '40' }}
-          COVER_LETTERS: ${{ vars.COVER_LETTERS || 'unless_declined' }}
+          COVER_LETTERS: ${{ vars.COVER_LETTERS || 'when_required' }}
         run: python -m jobagent.cv batch --max "$MAX_TAILOR" --deadline-minutes 300
 
       - name: Save to the data repository

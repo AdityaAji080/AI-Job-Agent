@@ -35,9 +35,11 @@ def wanted(decision: dict | None) -> bool:
     if not decision:
         return False
     stance = decision.get("decision")
+    if config.COVER_LETTERS == "unless_declined":
+        return stance != "declined"
     if config.COVER_LETTERS == "when_asked":
         return stance in ASKED
-    return stance != "declined"  # "unless_declined": forms often have a box the posting never mentions
+    return stance == "required"  # "when_required", the default (and any unknown value)  # "unless_declined": forms often have a box the posting never mentions
 
 
 def why(decision: dict | None) -> str:

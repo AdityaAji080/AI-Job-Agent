@@ -51,6 +51,10 @@ class FakeBatches:
         self.store[bid] = requests
         return {"id": bid}
 
+    def cancel(self, bid):
+        self.cancelled = getattr(self, "cancelled", []) + [bid]
+        return {"id": bid, "processing_status": "canceling"}
+
     def retrieve(self, bid):
         if self.hold:
             self.hold -= 1
@@ -145,6 +149,7 @@ def test_newest_first_and_only_untouched_rows(data):
     track(4, date_added="2026-10-20", applied="Yes")
     track(5, date_added="2026-10-20", status="rejected")
     track(6, date_added="2026-10-20", cv="applications/x/cv.pdf")
+    track(7, date_added="2026-10-20", applied="No")
     rows = batch.eligible(store.read_jobs(), exclude=set())
     assert [r["url"] for r in rows][:2] == [newest, middle] and len(rows) == 3
 
@@ -295,7 +300,8 @@ def wants_letter_cv():
 
 
 @needs_latex
-def test_letters_follow_the_finished_cv_only_where_wanted(data):
+def test_letters_follow_the_finished_cv_only_where_wanted(data, monkeypatch):
+    monkeypatch.setattr(config, "COVER_LETTERS", "unless_declined")
     save_notes("Acme", "- cached")
     asks = track(1)
     silent = track(2)
@@ -362,3 +368,63 @@ def test_a_single_job_can_repair_twice_in_one_run(data):
     assert summary["tailored"] == 1 and summary["in_progress"] == 0
     assert client.stages == [["draft"], ["critique"], ["repair"], ["repair"]]
     assert batch.load_state()["tracker_updates"][only]["cv"].endswith("/Jane_Example_CV.pdf")
+
+
+def test_jobs_marked_applied_or_no_meanwhile_are_dropped_and_their_batch_cancelled(data):
+    save_notes("Acme", "- cached")
+    applied, declined = track(1), track(2)
+    script = {"draft": lambda u: good_cv(), "critique": lambda u: READY}
+    first = Client(script, hold=10**9)
+    run(first, deadline_seconds=0.05)
+    assert len(batch.load_state()["jobs"]) == 2 and batch.load_state()["batch"]
+    # Applied to without waiting for the CV, and turned the other one down.
+    store.update_job(applied, applied="yes")
+    store.update_job(declined, applied="no")
+    second = Client(script)
+    second.messages.batches.store = first.messages.batches.store
+    summary = run(second)
+    assert summary["dropped"] == 2 and summary["tailored"] == 0 and not summary["batch_running"]
+    assert second.messages.batches.cancelled == ["batch_0"] and second.stages == []
+    state = batch.load_state()
+    assert state["jobs"] == {} and state["batch"] is None and state["tracker_updates"] == {}
+
+
+def test_a_job_archived_meanwhile_is_dropped_but_the_rest_continue(data):
+    save_notes("Acme", "- cached")
+    gone, kept = track(1), track(2)
+    script = {"draft": lambda u: good_cv(), "critique": lambda u: READY}
+    first = Client(script, hold=10**9)
+    run(first, deadline_seconds=0.05)
+    rows = [r for r in store.read_jobs() if r["url"] != gone]  # archived by the search run
+    with open(config.JOBS_CSV, "w", newline="", encoding="utf-8") as f:
+        import csv
+        w = csv.DictWriter(f, fieldnames=store.COLUMNS)
+        w.writeheader()
+        w.writerows(rows)
+    second = Client(script)
+    second.messages.batches.store = first.messages.batches.store
+    second.messages.batches.submitted = list(first.messages.batches.submitted)
+    summary = run(second)
+    assert summary["dropped"] == 1 and not getattr(second.messages.batches, "cancelled", [])
+    if shutil.which("pdflatex"):
+        assert summary["tailored"] == 1
+        assert list(batch.load_state()["tracker_updates"]) == [kept]
+
+
+def test_a_letter_no_longer_wanted_is_skipped_mid_way(data, monkeypatch):
+    save_notes("Acme", "- cached")
+    track(1)
+    state = batch.load_state()
+    pid = "p1"
+    state["jobs"][pid] = {"url": "https://jobs.lever.co/acme/1", "company": "Acme", "role": "Engineer 1",
+                          "stage": "letter", "cv": good_cv(), "review": READY, "repairs": 0, "steps": [],
+                          "error": "", "decision": {"decision": "not_mentioned", "reason": "silent"},
+                          "letter": None, "letter_review": None, "letter_repairs": 0,
+                          "letter_error": "", "letter_problems": []}
+    monkeypatch.setattr(config, "COVER_LETTERS", "when_required")
+    requests, _ = batch.build_requests(state, SOURCE)
+    assert [r["custom_id"].split("-")[0] for r in requests] == ["letter"]  # before advancing
+    monkeypatch.setattr(batch, "build", lambda source, cv, out: (None, []))  # no LaTeX needed
+    batch.advance_local(state, SOURCE, {"tailored": [], "failed": []}, log=lambda *_: None)
+    assert pid not in state["jobs"] or state["jobs"][pid]["stage"] != "letter"
+    assert batch.build_requests(state, SOURCE)[0] == []

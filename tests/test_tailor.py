@@ -384,6 +384,27 @@ def test_letter_column(data, monkeypatch):
     assert letter_column(None, None) == "" and letter_column({"decision": "declined"}, None, forced=True) == ""
     monkeypatch.setattr(config, "COVER_LETTERS", "when_asked")
     assert letter_column({"decision": "not_mentioned", "reason": "no mention"}, None) == "not needed: no mention"
+    monkeypatch.setattr(config, "COVER_LETTERS", "when_required")
+    assert letter_column({"decision": "invited", "reason": "optional"}, None) == "not needed: optional"
+
+
+@needs_latex
+def test_by_default_only_a_required_letter_is_written(data, monkeypatch):
+    monkeypatch.setattr(config, "COVER_LETTERS", "when_required")  # the code default
+    invited = {"decision": "invited", "reason": "cover letter optional"}
+    client = Client(research=[text_reply("- x")], cvs=[draft_with(invited)], reviews=[READY])
+    result = tailor(client, SOURCE, POSTING, log=lambda *_: None)
+    assert result.ok and result.letter_pdf is None and "letter" not in client.kinds()
+    assert result.letter_note == "not needed: cover letter optional"
+
+
+def test_the_code_default_is_when_required(monkeypatch):
+    import importlib
+    monkeypatch.delenv("COVER_LETTERS", raising=False)
+    try:
+        assert importlib.reload(config).COVER_LETTERS == "when_required"
+    finally:
+        importlib.reload(config)
 
 
 @pytest.mark.parametrize("mode,stance,expected", [
@@ -391,6 +412,8 @@ def test_letter_column(data, monkeypatch):
     ("unless_declined", "not_mentioned", True), ("unless_declined", "declined", False),
     ("when_asked", "required", True), ("when_asked", "invited", True),
     ("when_asked", "not_mentioned", False), ("when_asked", "declined", False),
+    ("when_required", "required", True), ("when_required", "invited", False),
+    ("when_required", "not_mentioned", False), ("when_required", "declined", False),
 ])
 def test_which_postings_get_a_letter(monkeypatch, mode, stance, expected):
     from jobagent.cv import letter
@@ -430,7 +453,8 @@ def test_no_letter_when_the_posting_declines_one_unless_forced(data):
 
 
 @needs_latex
-def test_a_posting_silent_on_letters_still_gets_one_for_the_form(data):
+def test_a_posting_silent_on_letters_still_gets_one_for_the_form(data, monkeypatch):
+    monkeypatch.setattr(config, "COVER_LETTERS", "unless_declined")
     silent = {"decision": "not_mentioned", "reason": "Posting does not mention a cover letter"}
     client = Client(research=[text_reply("- x")], cvs=[draft_with(silent)], reviews=[READY],
                     letters=[LETTER], letter_reviews=[READY])
