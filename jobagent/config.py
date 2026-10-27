@@ -44,10 +44,11 @@ COMPANY_COOLDOWN_DAYS = int(os.environ.get("COMPANY_COOLDOWN_DAYS", "14"))
 LARGE_EMPLOYER_POSTINGS = int(os.environ.get("LARGE_EMPLOYER_POSTINGS", "150"))
 CROWDED_APPLICANTS = int(os.environ.get("CROWDED_APPLICANTS", "100"))
 MAX_CROWDED_PER_RUN = int(os.environ.get("MAX_CROWDED_PER_RUN", "2"))
-# Cover letters: "unless_declined" writes one for every job unless the posting asks not
-# to send one (application forms often have a box the posting never mentions);
-# "when_asked" only where the posting asks for or invites one.
-COVER_LETTERS = os.environ.get("COVER_LETTERS", "unless_declined")
+# Cover letters: "when_required" (the default) writes one only where the posting requires
+# one; "when_asked" also where it invites one (optional, or apply by email to a named
+# person); "unless_declined" for every job unless the posting asks not to send one.
+# A letter can always be forced for one job with the Tailor CVs workflow's "letter" box.
+COVER_LETTERS = os.environ.get("COVER_LETTERS", "when_required")
 # Each market's share of a run's slots. A market at its share may take more only once
 # every other market still under its share has no candidates left, so spare slots flow
 # over and none are wasted. Singapore first (where the MSc is), then India and Canada.

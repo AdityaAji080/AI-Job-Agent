@@ -17,7 +17,9 @@ The steps are the same requests as `tailor` (llm.py), sent as batches at half pr
 
 Progress lives in data/tailor_state.json and is saved after every batch, so a run that
 reaches its time limit leaves its batch running and the next run collects it. Nothing
-is paid for twice.
+is paid for twice. A job in progress that has since been marked applied (yes or no), had
+its status changed, or left the tracker is dropped at the start of the next run; a batch
+left running for dropped jobs alone is cancelled.
 
 This module never edits jobs.csv. Finished CV and letter paths (or "failed: ...",
 "skipped: ..." / "not needed: ...") wait in the state file until `apply-updates`, which the workflow runs right after pulling
@@ -42,7 +44,7 @@ from .tailor import MAX_REPAIRS, cached_notes, letter_column, out_dir_for, save_
 STATE_FILE = "tailor_state.json"
 # A tracker row is tailored when its status is still new and it hasn't been applied to.
 OPEN_STATUSES = {"", "new"}
-APPLIED = archive.APPLIED  # one definition of "marked applied"
+APPLIED = archive.APPLIED | archive.DECLINED  # marked either way: no CV needed
 PREPARE_CONCURRENCY = 6
 LETTER_STAGES = ("letter", "letter_review", "letter_revise", "letter_repair")
 
@@ -86,7 +88,7 @@ def apply_updates() -> int:
 # ---------------------------------------------------------------- choosing jobs
 
 def eligible(rows: list[dict], exclude: set[str]) -> list[dict]:
-    """Rows still to tailor, newest first: no CV yet, status new, not applied to."""
+    """Rows still to tailor, newest first: no CV yet, status new, applied left blank."""
     picked = []
     for index, row in enumerate(rows):
         url = row.get("url", "")
@@ -98,6 +100,48 @@ def eligible(rows: list[dict], exclude: set[str]) -> list[dict]:
             continue
         picked.append((row.get("date_added", ""), index, row))
     return [row for *_, row in sorted(picked, key=lambda t: (t[0], t[1]), reverse=True)]
+
+
+def _no_longer_needed(row: dict | None) -> str:
+    """Why a tracker row no longer wants a CV, or "" if it still does."""
+    if row is None:
+        return "no longer in the tracker"
+    if row.get("applied", "").strip().lower() in archive.APPLIED:
+        return "marked applied"
+    if row.get("applied", "").strip().lower() in archive.DECLINED:
+        return "marked not applying"
+    if row.get("status", "").strip().lower() not in OPEN_STATUSES:
+        return f"status is {row.get('status', '').strip()}"
+    return ""
+
+
+def drop_unneeded(client, state: dict, log) -> int:
+    """Stop work on jobs that no longer need a CV (applied to already, turned down, or
+    gone from the tracker). Cancels a running batch that holds nothing else. Returns how
+    many jobs were dropped."""
+    rows = {}
+    for row in store.read_jobs():
+        if row.get("url"):
+            for key in store.key_aliases(store.job_key(row["url"])):
+                rows[key] = row
+    dropped = 0
+    for pid, job in list(state["jobs"].items()):
+        reason = _no_longer_needed(rows.get(store.job_key(job["url"])))
+        if reason:
+            log(f"  dropping {job['company']}, {job['role']}: {reason}")
+            del state["jobs"][pid]
+            dropped += 1
+    if dropped and state["batch"] and not state["jobs"]:
+        batch_id = state["batch"]["id"]
+        try:
+            client.messages.batches.cancel(batch_id)
+            log(f"  cancelled batch {batch_id}: none of its jobs need a CV any more")
+        except Exception as exc:  # already ended, or gone: nothing more to pay either way
+            log(f"  could not cancel batch {batch_id} ({exc}); its results are ignored")
+        state["batch"] = None
+    if dropped:
+        save_state(state)
+    return dropped
 
 
 async def _prepare(rows: list[dict], need: int, log) -> tuple[list[dict], dict, int]:
@@ -294,6 +338,9 @@ def advance_local(state: dict, source: dict, results: dict, log) -> None:
         job = state["jobs"][pid]
         out = out_dir_for(job)
         problems = []
+        if job["stage"] in LETTER_STAGES + ("letter_check",) and not _wants_letter(job):
+            # COVER_LETTERS changed while the letter was under way: finish with the CV only.
+            job["letter"], job["stage"] = None, "render"
         if job["stage"] == "check":
             problems = check_content(source, job["cv"])
             if any(p.level == "error" for p in problems):
@@ -380,6 +427,7 @@ def run(client, source: dict, *, max_jobs: int, deadline_seconds: float, poll_se
     deadline = time.monotonic() + deadline_seconds
     state = load_state()
     results = {"tailored": [], "failed": [], "closed": 0, "missing_text": 0}
+    results["dropped"] = drop_unneeded(client, state, log)
 
     if state["batch"]:
         log(f"Collecting the batch left running by the last run ({state['batch']['id']})")
@@ -440,6 +488,7 @@ def _summary(state: dict, results: dict) -> dict:
     return {"tailored": len(results["tailored"]), "letters": len(results.get("letters", [])),
             "failed": [(j["company"], j["role"], j["error"]) for j in results["failed"]],
             "closed": results["closed"], "missing_text": results["missing_text"],
+            "dropped": results.get("dropped", 0),
             "in_progress": len(state["jobs"]), "batch_running": bool(state["batch"]),
             "cost_usd": round(spent, 2)}
 
@@ -454,6 +503,9 @@ def write_step_summary(summary: dict) -> None:
              f"failed {len(summary['failed'])}, "
              f"skipped {summary['closed']} closed posting(s). About ${summary['cost_usd']:.2f} "
              f"at batch prices.", ""]
+    if summary.get("dropped"):
+        lines.append(f"Stopped work on {summary['dropped']} job(s) already marked applied, marked "
+                     "not applying, or gone from the tracker.")
     if summary["missing_text"]:
         lines.append(f"{summary['missing_text']} job(s) had no readable posting text; "
                      "use the manual workflow with --posting-file for those.")

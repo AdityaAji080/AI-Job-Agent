@@ -11,6 +11,10 @@ Postings usually vanish once a job closes, so posting.md is what to reread befor
 interview. The job stays in seen.csv, so it is never recorded again; its company and role
 also count for the duplicate check, so a repost under a new URL isn't recorded either.
 
+Mark a job `no` instead (no, n, skip, pass ...) and it goes the same way, without the
+paperwork: the row moves to data/archive/not_applied.csv and its application folder (CV,
+letter) and saved posting are deleted. It still counts for the duplicate check.
+
     python -m jobagent.archive      # archive now, without a search run
 """
 from __future__ import annotations
@@ -24,6 +28,7 @@ from pathlib import Path
 from . import config, postings, store
 
 APPLIED = {"yes", "y", "true", "1", "x", "applied", "done"}
+DECLINED = {"no", "n", "false", "0", "skip", "skipped", "pass", "not applying", "won't apply"}
 EXTRA_COLUMNS = ["archived", "folder"]
 
 
@@ -37,6 +42,11 @@ def archive_csv() -> Path:
 
 def is_applied(row: dict) -> bool:
     return (row.get("applied") or "").strip().lower() in APPLIED
+
+
+def is_declined(row: dict) -> bool:
+    """Marked as not applying (applied = no)."""
+    return (row.get("applied") or "").strip().lower() in DECLINED
 
 
 read_archived = store.read_archived
@@ -99,9 +109,39 @@ def archive_applied(today: date | None = None) -> list[dict]:
         row["folder"] = str(dest.relative_to(config.DATA_DIR))
         archived.append(row)
 
-    _append_archive(archived)
+    _append_archive(archive_csv(), read_archived(), archived)
     _rewrite_tracker([r for r in rows if not is_applied(r)])
     return archived
+
+
+def archive_declined(today: date | None = None) -> list[dict]:
+    """Move every row marked applied = no to not_applied.csv and delete its CV folder and
+    saved posting. Returns the rows moved."""
+    rows = store.read_jobs()
+    done = [r for r in rows if is_declined(r)]
+    if not done:
+        return []
+    store.declined_csv().parent.mkdir(parents=True, exist_ok=True)
+    for row in done:
+        folder = _application_folder(row)
+        if folder is not None:
+            shutil.rmtree(folder, ignore_errors=True)
+        saved = postings.path_for(row.get("url", "")) if row.get("url") else None
+        if saved is not None and saved.exists():
+            saved.unlink()
+        for col in ("cv", "cover_letter"):  # the files are gone
+            if (row.get(col) or "").startswith("applications/"):
+                row[col] = ""
+        row["archived"] = (today or date.today()).isoformat()
+        row["folder"] = ""
+    _append_archive(store.declined_csv(), store.read_declined(), done)
+    _rewrite_tracker([r for r in rows if not is_declined(r)])
+    return done
+
+
+def archive_marked(today: date | None = None) -> tuple[list[dict], list[dict]]:
+    """Both: (rows archived as applied, rows moved out as not applied)."""
+    return archive_applied(today), archive_declined(today)
 
 
 def _sweep_late_arrivals() -> None:
@@ -109,6 +149,10 @@ def _sweep_late_arrivals() -> None:
     move what it wrote into the job's archive folder."""
     from .cv.tailor import out_dir_for
 
+    for row in store.read_declined():  # turned down: whatever arrived late isn't wanted
+        late = config.DATA_DIR / "applications" / out_dir_for(row).name
+        if late.is_dir():
+            shutil.rmtree(late, ignore_errors=True)
     for row in read_archived():
         late = config.DATA_DIR / "applications" / out_dir_for(row).name
         home = config.DATA_DIR / (row.get("folder") or "")
@@ -122,9 +166,7 @@ def _sweep_late_arrivals() -> None:
         shutil.rmtree(late, ignore_errors=True)
 
 
-def _append_archive(rows: list[dict]) -> None:
-    path = archive_csv()
-    existing = read_archived()
+def _append_archive(path: Path, existing: list[dict], rows: list[dict]) -> None:
     header = list(store.COLUMNS) + EXTRA_COLUMNS
     for r in existing + rows:  # keep any columns you added yourself
         header += [c for c in r if c and c not in header]
@@ -149,10 +191,12 @@ def _rewrite_tracker(rows: list[dict]) -> None:
 
 
 def main() -> int:
-    archived = archive_applied()
+    archived, declined = archive_marked()
     for r in archived:
         print(f"archived  {r.get('company')}: {r.get('role')}  ->  {r['folder']}")
-    print(f"{len(archived)} job(s) archived.")
+    for r in declined:
+        print(f"removed   {r.get('company')}: {r.get('role')}  (not applying)")
+    print(f"{len(archived)} job(s) archived as applied, {len(declined)} removed as not applying.")
     return 0
 
 

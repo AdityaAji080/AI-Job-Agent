@@ -172,11 +172,26 @@ def read_archived() -> list[dict]:
     return _read(path) if path.exists() else []
 
 
+def declined_csv() -> Path:
+    """Jobs marked applied = no: moved out of the tracker, their CVs deleted."""
+    return config.DATA_DIR / "archive" / "not_applied.csv"
+
+
+def read_declined() -> list[dict]:
+    path = declined_csv()
+    return _read(path) if path.exists() else []
+
+
+def _all_archived() -> list[dict]:
+    """Both archives: a job applied to or turned down still counts as tracked."""
+    return read_archived() + read_declined()
+
+
 def tracked_role_keys() -> set[str]:
     """company+role+market of every job in the tracker or the archive: a repost of one under
     a new URL is the same job."""
     return {role_key(j.get("company", ""), j.get("role", "")) + "|" + (j.get("market") or "")
-            for j in read_jobs() + read_archived()}
+            for j in read_jobs() + _all_archived()}
 
 
 def recently_recorded(days: int, today: date | None = None) -> dict[str, str]:
@@ -187,7 +202,7 @@ def recently_recorded(days: int, today: date | None = None) -> dict[str, str]:
     today = today or date.today()
     latest: dict[str, str] = {}
     dated = [(s.get("company", ""), s.get("date", "")) for s in read_seen() if s.get("decision") == "recorded"]
-    dated += [(j.get("company", ""), j.get("date_added", "")) for j in read_jobs() + read_archived()]
+    dated += [(j.get("company", ""), j.get("date_added", "")) for j in read_jobs() + _all_archived()]
     for company, when in dated:
         try:
             age = (today - date.fromisoformat(when)).days
@@ -208,7 +223,7 @@ def append_jobs(jobs: list[dict]) -> dict:
     """Add jobs, rejecting duplicates by URL and by company+role+location."""
     ensure_schema()
     existing = read_jobs()
-    keys = _with_aliases({job_key(j.get("url", "")) for j in existing + read_archived()})
+    keys = _with_aliases({job_key(j.get("url", "")) for j in existing + _all_archived()})
     roles = tracked_role_keys()
     added, rejected = [], []
     for job in jobs:

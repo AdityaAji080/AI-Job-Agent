@@ -132,8 +132,8 @@ Personal files live in a **separate private repository**, so this one can be pub
    - Optional variables `MAX_BUDGET_USD` (default 2.00), `MAX_NEW_JOBS` (default 6),
      `MAX_US_JOBS` (default 1), `MAX_PER_COMPANY` (default 1), `COMPANY_COOLDOWN_DAYS`
      (default 14), `LARGE_EMPLOYER_POSTINGS` (default 150), `CROWDED_APPLICANTS` (default
-     100), `MAX_CROWDED_PER_RUN` (default 2), `COVER_LETTERS` (default `unless_declined`,
-     or `when_asked`), `MARKET_SHARES` (default
+     100), `MAX_CROWDED_PER_RUN` (default 2), `COVER_LETTERS` (default `when_required`;
+     or `when_asked`, `unless_declined`), `MARKET_SHARES` (default
      `Singapore=0.6,India=0.2,Canada=0.2`), `MARKET_RELEASE_AFTER` (default 15: candidates
      judged in a market before its unfilled share goes to the others), `JOBAGENT_MODEL` (default `sonnet`; set to
      `opus` for the larger model)
@@ -216,10 +216,11 @@ job's `review.json`), or `skipped: posting closed`. Clear the cell to have it tr
 The CV's draft step records, from the posting text alone, what it says about a letter:
 **required**, **invited** (optional, asks why you want the role, or apply by email to a
 named person), **not mentioned**, or **declined** (asks you not to send one). By default
-(`COVER_LETTERS=unless_declined`) every job gets a letter unless the posting declines one,
-because application forms often have a cover letter box the posting never mentions. With
-`COVER_LETTERS=when_asked`, only required and invited do. The decision costs no extra
-request.
+(`COVER_LETTERS=when_required`) only a job whose posting requires a letter gets one, to
+keep costs down. With `COVER_LETTERS=when_asked`, invited ones get one too; with
+`COVER_LETTERS=unless_declined`, every job does unless the posting declines one (forms
+often have a cover letter box the posting never mentions). Set it as a repository
+variable to change it. The decision costs no extra request.
 
 The letter is written after the CV is final, so the two agree, in the same steps: a draft
 (Opus) from your CV source, the finished CV, the posting and the company notes; a
@@ -232,7 +233,7 @@ posting, never from the model.
 
 A letter that fails never holds back the CV. The tracker's `cover_letter` column holds the
 letter's path, `not wanted: <reason>` (the posting declined one), `not needed: <reason>`
-(with `when_asked`), or `failed: <reason>`. To force a letter anyway, run the Tailor CVs
+(the posting doesn't require one), or `failed: <reason>`. To force a letter anyway, run the Tailor CVs
 workflow with the job's URL and **letter** ticked (or `tailor URL --letter`). At batch
 prices a letter costs about $0.05–0.08.
 
@@ -289,22 +290,28 @@ The next search run, before it searches, moves the job out of `jobs.csv`:
 - the posting text is copied into that folder as `posting.md`, because postings usually
   disappear once a job closes, and it's what to reread before an interview.
 
-An archived job stays in `seen.csv`, so it is never recorded again, and its company and
-role count in the duplicate check, so a repost under a new URL isn't either. A CV still
-being tailored when its job is archived joins the archive folder on the next run. To
-archive straight away without a search: `python -m jobagent.archive`.
+Not applying? Put `no` (or `n`, `skip`, `pass`) in the `applied` column instead. The next
+run moves the row to `data/archive/not_applied.csv` and deletes its CV, cover letter and
+saved posting.
+
+An archived job, either way, stays in `seen.csv`, so it is never recorded again, and its
+company and role count in the duplicate check, so a repost under a new URL isn't either.
+CV tailoring stops work on a job as soon as it is marked `yes` or `no` (or leaves the
+tracker), even mid-batch, and cancels a running batch that holds nothing else, so you can
+apply without waiting for the CV and nothing more is spent on it. To archive straight
+away without a search: `python -m jobagent.archive`.
 
 ## The data files
 
 | File | What it holds |
 | --- | --- |
-| `jobs.csv` | The tracker. `status` and `applied` are yours to edit. The agent only appends rows; CV tailoring fills in each row's `cv` and `cover_letter` columns. A job is tailored while its `status` is `new` and `applied` isn't marked yes. |
+| `jobs.csv` | The tracker. `status` and `applied` are yours to edit. The agent only appends rows; CV tailoring fills in each row's `cv` and `cover_letter` columns. A job is tailored while its `status` is `new` and `applied` is blank. |
 | `seen.csv` | Every posting judged, with the decision and the reason. Delete a row to have it judged again. |
 | `boards.csv` | The registry. Set `enabled` to `no` to stop reading a board. A board that fails three runs in a row disables itself. |
 | `runs.csv` | One line per run: boards read, pool size, recorded, skipped, cost. |
 | `postings/` | The text of each recorded posting, saved when it was recorded. |
 | `applications/` | Tailored CVs and cover letters, one folder per posting. |
-| `archive/` | Jobs marked applied: `applied.csv` and one folder each with the CV, letter and posting. |
+| `archive/` | Jobs marked applied: `applied.csv` and one folder each with the CV, letter and posting. Jobs marked `no`: `not_applied.csv` (rows only). |
 | `companies/` | Company research notes used by the CV reviewer, reused for 45 days. |
 | `tailor_state.json` | CV tailoring in progress between runs (normally empty). |
 

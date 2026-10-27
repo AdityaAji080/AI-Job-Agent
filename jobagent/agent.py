@@ -530,14 +530,18 @@ async def main() -> int:
             return 2
 
     if not args.dry_run:
-        # Jobs marked applied leave the tracker for data/archive/ before anything else.
-        archived = archive.archive_applied()
+        # Jobs marked applied (yes or no) leave the tracker for data/archive/ before
+        # anything else, so the CV tailoring that follows never works on them.
+        archived, declined = archive.archive_marked()
         for row in archived:
             print(f"Archived (applied): {row.get('company')}: {row.get('role')}", flush=True)
+        for row in declined:
+            print(f"Removed (not applying): {row.get('company')}: {row.get('role')}", flush=True)
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-        if archived and summary_path:
+        if (archived or declined) and summary_path:
             with open(summary_path, "a", encoding="utf-8") as f:
-                f.write(f"Archived {len(archived)} job(s) marked applied.\n\n")
+                f.write(f"Archived {len(archived)} job(s) marked applied; removed {len(declined)} "
+                        "marked not applying.\n\n")
 
     registry = Registry.load()
     run = Run(registry)

@@ -106,3 +106,40 @@ def test_a_taken_archive_folder_name_gets_a_suffix(data):
     (data / "archive" / (data / row["cv"]).parent.name).mkdir(parents=True)
     archive.archive_applied()
     assert store.read_archived()[0]["folder"].endswith("-2")
+
+
+def test_jobs_marked_no_leave_the_tracker_and_their_cvs_are_deleted(data):
+    declined = track(1, letter=True, applied="No")
+    untailored = track(2, tailored=False, applied="skip")
+    waiting = track(3)
+    applied = track(4, applied="yes")
+    folder = data / store.read_jobs()[0]["cv"]
+    archived, removed = archive.archive_marked(today=date(2026, 10, 27))
+
+    assert [r["url"] for r in archived] == [applied]
+    assert sorted(r["url"] for r in removed) == sorted([declined, untailored])
+    assert [r["url"] for r in store.read_jobs()] == [waiting]
+    rows = {r["url"]: r for r in store.read_declined()}
+    assert set(rows) == {declined, untailored} and rows[declined]["archived"] == "2026-10-27"
+    assert rows[declined]["cv"] == "" and rows[declined]["cover_letter"] == ""
+    assert not folder.parent.exists() and postings.load(declined) is None
+    assert [r["url"] for r in store.read_archived()] == [applied]  # applied.csv holds only applied
+    # Still counts as tracked: never recorded again, nor a repost under a new URL.
+    again = store.append_jobs([{"company": "Acme", "role": "Engineer 1", "url": declined,
+                                "market": "Singapore", "location": "Singapore", "why": "x"}])
+    repost = store.append_jobs([{"company": "Acme", "role": "Engineer 1", "market": "Singapore",
+                                 "url": "https://jobs.lever.co/acme/999", "location": "Singapore",
+                                 "why": "x"}])
+    assert not again.get("added") and not repost.get("added")
+    # A second run finds nothing more to do.
+    assert archive.archive_marked() == ([], [])
+
+
+def test_a_cv_finishing_after_its_job_was_turned_down_is_deleted(data):
+    url = track(1, tailored=False, applied="no")
+    archive.archive_marked()
+    late = data / "applications" / out_dir_for(store.read_declined()[0]).name
+    late.mkdir(parents=True)
+    (late / "Jane_Example_CV.pdf").write_bytes(b"%PDF late")
+    archive.archive_marked()
+    assert not late.exists()
