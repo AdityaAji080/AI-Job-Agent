@@ -70,6 +70,8 @@ jobs:
           MAX_CROWDED_PER_RUN: ${{ vars.MAX_CROWDED_PER_RUN || '2' }}
           MARKET_SHARES: ${{ vars.MARKET_SHARES || '' }}
           MARKET_RELEASE_AFTER: ${{ vars.MARKET_RELEASE_AFTER || '15' }}
+          DISCOVERY_RESERVE: ${{ vars.DISCOVERY_RESERVE || '0.3' }}
+          BOARD_RETIRE_AFTER: ${{ vars.BOARD_RETIRE_AFTER || '300' }}
           JOBAGENT_MODEL: ${{ vars.JOBAGENT_MODEL || 'sonnet' }}
         run: python -m jobagent.agent
 

@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from collections import Counter
+from dataclasses import replace
 from datetime import date
 
 from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock,
@@ -23,7 +24,7 @@ from .ats import mycareersfuture as mcf
 from .ats.base import make_client
 from .discover import probe
 from .harvest import Candidate, BoardResult, crowd_reason, harvest, harvest_board, rank
-from .prompt import KICKOFF, SYSTEM_PROMPT
+from .prompt import DISCOVERY_KICKOFF, KICKOFF, SYSTEM_PROMPT
 from .registry import Registry
 
 
@@ -40,6 +41,7 @@ class Run:
         self.recorded_by_company = Counter()
         self.by_role: dict[str, str] = {}
         self.registered: list[str] = []
+        self.retired: list[str] = []  # boards disabled this run for never paying off
         self.board_results: list[BoardResult] = []
         self.probed = 0
         self.harvest_text = ""  # snapshot of the harvest, taken before the model starts
@@ -95,6 +97,9 @@ class Run:
             self.board_results.append(r)
             self.registry.record_check(r.board.key, ok=r.ok, status=r.error,
                                        postings=r.postings, candidates=len(r.candidates))
+            if r.ok and self.registry.retire_if_unproductive(
+                    r.board.key, recorded_elsewhere=bool(self.last_recorded(r.board.company))):
+                self.retired.append(r.board.company or r.board.slug)
             for c in r.candidates:
                 rk = store.role_key(c.company, c.title) + "|" + c.market
                 if rk in tracked or c.id in self.pool:
@@ -496,6 +501,10 @@ def harvest_summary(run: Run) -> str:
     if crowded:
         lines.append(f"- Crowded candidates (large employers or many applicants): {crowded}; "
                      f"at most {config.MAX_CROWDED_PER_RUN} can be recorded this run.")
+    if run.retired:
+        lines.append(f"- Boards retired (over {config.BOARD_RETIRE_AFTER} candidates, none ever recorded; "
+                     "re-enable in boards.csv): " + ", ".join(run.retired) + ". Their candidates are "
+                     "still in this run's pool.")
     for r in failed:
         lines.append(f"- Board failed: {r.board.company or r.board.slug} ({r.board.ats}): {r.error}")
     if not run.board_results:
@@ -541,7 +550,10 @@ def append_run_row(row: dict) -> None:
     tmp.replace(path)
 
 
-def log_run(run: Run, result: ResultMessage | None, final_text: str) -> None:
+def log_run(run: Run, results: list[ResultMessage], final_text: str) -> None:
+    """One runs.csv row for the whole run; cost and turns add up both sessions."""
+    results = [r for r in results if r]
+    cost = sum(r.total_cost_usd or 0 for r in results)
     row = {
         "date": date.today().isoformat(),
         "boards": len(run.board_results),
@@ -552,9 +564,9 @@ def log_run(run: Run, result: ResultMessage | None, final_text: str) -> None:
         "skipped": sum(run.skipped.values()),
         "registered": len(run.registered),
         "probed": run.probed,
-        "cost_usd": f"{(result.total_cost_usd or 0):.2f}" if result else "",
-        "turns": result.num_turns if result else "",
-        "outcome": result.subtype if result else "no result",
+        "cost_usd": f"{cost:.2f}" if results else "",
+        "turns": sum(r.num_turns or 0 for r in results) if results else "",
+        "outcome": " + ".join(r.subtype for r in results) if results else "no result",
         "summary": " ".join(final_text.split())[:500],
     }
     append_run_row(row)
@@ -645,22 +657,53 @@ async def main() -> int:
         max_budget_usd=config.MAX_BUDGET_USD,
     )
 
-    final_text, result = "", None
+    final_text, results = "", []
     try:
+        judging_budget = config.MAX_BUDGET_USD * (1 - max(0.0, min(config.DISCOVERY_RESERVE, 0.9)))
         kickoff = KICKOFF.format(harvest_summary=run.harvest_text, start=kickoff_start())
-        async for msg in query(prompt=kickoff, options=options):
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock) and block.text.strip():
-                        print(block.text, flush=True)
-                        final_text = block.text
-            elif isinstance(msg, ResultMessage):
-                result = msg
-                print(f"\nCost: ${msg.total_cost_usd or 0:.2f}  Turns: {msg.num_turns}  ({msg.subtype})")
+        text, result = await _session(kickoff, replace(options, max_budget_usd=judging_budget))
+        final_text, results = text, [result]
+        spent = (result.total_cost_usd or 0) if result else judging_budget
+        left = config.MAX_BUDGET_USD - spent
+        if config.DISCOVERY_RESERVE > 0 and left >= config.DISCOVERY_MIN_USD:
+            print(f"\n--- Discovery session (${left:.2f} left) ---", flush=True)
+            text, result = await _session(discovery_kickoff(run), replace(options, max_budget_usd=left))
+            results.append(result)
+            if text:
+                final_text = f"{final_text}\n\nDiscovery session: {text}"
     finally:
         registry.save()
-        log_run(run, result, final_text)
+        log_run(run, results, final_text)
     return 0
+
+
+async def _session(prompt: str, options: ClaudeAgentOptions) -> tuple[str, ResultMessage | None]:
+    """One agent session; returns its last text and its result message."""
+    final_text, result = "", None
+    async for msg in query(prompt=prompt, options=options):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock) and block.text.strip():
+                    print(block.text, flush=True)
+                    final_text = block.text
+        elif isinstance(msg, ResultMessage):
+            result = msg
+            print(f"\nCost: ${msg.total_cost_usd or 0:.2f}  Turns: {msg.num_turns}  ({msg.subtype})")
+    return final_text, result
+
+
+def discovery_kickoff(run: Run) -> str:
+    """Start of the discovery session: what the judging session left behind."""
+    markets = Counter()
+    for e in run.registry.active():
+        if e.ats != "mycareersfuture":
+            markets.update({c.market for c in run.pool.values() if c.board_key == e.key} or {"no open candidates"})
+    return DISCOVERY_KICKOFF.format(
+        recorded=run.recorded, max_new=config.MAX_NEW_JOBS,
+        remaining=max(0, config.MAX_NEW_JOBS - run.recorded),
+        registered=", ".join(run.registered) or "none",
+        registry_markets=", ".join(f"{m} {markets[m]}" for m in filters.MARKET_ORDER + ["no open candidates"]
+                                   if markets.get(m)) or "unknown")
 
 
 if __name__ == "__main__":

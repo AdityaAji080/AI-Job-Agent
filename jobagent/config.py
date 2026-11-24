@@ -81,6 +81,12 @@ def market_slots(max_jobs: int | None = None) -> dict[str, int]:
     n = MAX_NEW_JOBS if max_jobs is None else max_jobs
     return {m: max(1, int(n * s + 0.5)) for m, s in MARKET_SHARES.items()}
 MAX_BUDGET_USD = float(os.environ.get("MAX_BUDGET_USD", "2.00"))
+# Share of MAX_BUDGET_USD held back from judging for a second, discovery-only session aimed
+# at India and Canada, whose pools are small and keep returning the same employers. The
+# judging session gets the rest; the discovery session gets whatever is left after it
+# (at least this share), and is skipped when under DISCOVERY_MIN_USD. 0 turns it off.
+DISCOVERY_RESERVE = float(os.environ.get("DISCOVERY_RESERVE", "0.3"))
+DISCOVERY_MIN_USD = 0.25
 MODEL = os.environ.get("JOBAGENT_MODEL", "sonnet")
 
 # --- Harvester --------------------------------------------------------------
@@ -89,6 +95,10 @@ CONCURRENCY = 8
 USER_AGENT = "job-agent/1.0 (personal job search; +https://github.com)"
 # A board that fails this many runs in a row is disabled (re-enable in boards.csv).
 MAX_BOARD_FAILURES = 3
+# A board whose postings have reached the pool this many times in all (counted per run) with
+# none ever recorded, from an employer never recorded anywhere, is disabled: it only adds
+# crowded or ill-fitting roles. Re-enable in boards.csv; 0 turns this off.
+BOARD_RETIRE_AFTER = int(os.environ.get("BOARD_RETIRE_AFTER", "300"))
 # Workday tenants are huge, so we search them rather than list everything.
 WORKDAY_SEARCH_TERMS = [
     "machine learning", "AI engineer", "software engineer", "computer vision",
