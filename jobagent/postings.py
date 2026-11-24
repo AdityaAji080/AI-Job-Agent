@@ -1,8 +1,8 @@
 """Saved posting text (data/postings/), so tailoring works from what the agent judged.
 
 When `add_jobs` records a pool candidate, its description is saved here. Jobs recorded
-before this existed, or found by open search, can be re-read from their job board with
-`refetch`. Saved text is the employer's own words and is treated as untrusted data by
+before this existed, or found by open search, are re-read from their job board (or the
+page itself) by `ensure`. Saved text is the employer's own words and is treated as untrusted data by
 everything downstream.
 
     python -m jobagent.postings URL [URL ...]   # re-read and save, e.g. for older tracker rows
@@ -267,12 +267,6 @@ async def read_page(url: str, role: str = "", client=None) -> str:
     finally:
         if own:
             await client.aclose()
-
-
-async def refetch(url: str, company: str = "") -> Posting | None:
-    """Re-read one posting from its job board. None when it can't be read or has closed."""
-    status, posting = await check(url, company)
-    return posting if status == OPEN else None
 
 
 async def ensure(url: str, company: str = "", role: str = "") -> dict | None:

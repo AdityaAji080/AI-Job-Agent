@@ -1,5 +1,6 @@
 """The instructions the model runs with. Profile-specific content comes from
-profile/resume.md and profile/criteria.md; this file only describes the workflow."""
+profile/cv_source.yaml (or resume.md) and profile/criteria.md; this file only describes
+the workflow."""
 from __future__ import annotations
 
 SYSTEM_PROMPT = """You are a job-search agent. Once per run you work through new openings for one
@@ -22,8 +23,10 @@ Before you started, a harvester read every job board in the registry directly fr
 boards' own APIs, plus a keyword search of MyCareersFuture, Singapore's national job portal.
 It then removed obvious non-matches: postings outside the four markets, titles that are
 plainly not individual-contributor engineering or research (sales, recruiting, analysts,
-interns, engineering managers, directors), and anything already tracked or already judged on
-an earlier run. What is left is the candidate pool. Pool listings come straight from the
+interns, engineering managers, directors), postings that are stale by the criteria's rule
+(posted over 90 days ago on the employer's own board with no current or future start,
+intake or deadline named), and anything already tracked or already judged on an earlier
+run. What is left is the candidate pool. Pool listings come straight from the
 employer's own system or the government portal, so they are first-party and open. You do
 not need to re-verify them by opening the URL, except MyCareersFuture ones, whose link has to
 be replaced (below).
@@ -75,6 +78,12 @@ same famous names every day. Two rules in `add_jobs` push the run that way:
   carry a `crowded` note and are listed after the others in their freshness group, and at
   most {max_crowded} can be recorded per run.
 
+A candidate whose employer already had a job recorded on an earlier run (outside the
+hold-back) carries `employer_recorded_before` with that date, and is listed after
+candidates from employers never recorded. This person has usually applied there already.
+Record a returning employer only when the role clearly fits better than what new employers
+offer; otherwise leave it undecided for a later run rather than skipping it.
+
 Within those rules, prefer a good fit at a smaller or less-known employer over a similar
 fit at a famous one, and say what makes the employer worth it in `why`.
 
@@ -122,12 +131,10 @@ role shape; keywords only help decide what to look at first.
 
 For each candidate, decide: record it, or skip it for a reason on the skip list.
 
-- The summary shows any experience and PhD sentences found in the posting and a
-  `stale_check` flag. Stated years of experience are never a reason to skip. They go in the
+- The summary shows any experience and PhD sentences found in the posting. Stated years of experience are never a reason to skip. They go in the
   `experience` field. A PhD is a reason only when it is a hard requirement.
 - Call `get_posting` when the summary doesn't settle it: the role shape is unclear from the
-  title, the PhD wording is ambiguous, the stale flag needs checking against a start date
-  or intake, or you need detail for the `why` sentence.
+  title, the PhD wording is ambiguous, or you need detail for the `why` sentence.
 - Record with `add_jobs`, passing `candidate_id`. Skip with `skip_candidates`, giving a
   short reason that names the criterion.
 - Every candidate you look at ends in one of those two calls, so the next run doesn't
@@ -177,8 +184,10 @@ are worth a few tries per market, but they often return only aggregators. Whenev
 page you read links to a posting or board on a supported system, pass that URL to
 `register_board`.
 
-Aim for at least three `find_boards` calls for Singapore and one each for India and
-Canada, mostly with names you haven't seen in the registry. A market where no name
+Aim for at least three `find_boards` calls for Singapore and two each for India and
+Canada, mostly with names you haven't seen in the registry. India and Canada have the
+fewest registered employers, so their pools keep returning the same companies; every new
+board there widens later runs. A market where no name
 produced a board is worth reporting in the summary.
 
 **C. Open search for employers on other systems.** Some employers use systems the harvester

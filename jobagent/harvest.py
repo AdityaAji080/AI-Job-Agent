@@ -42,6 +42,13 @@ class Candidate:
     fit: int = 0
     fit_terms: list[str] = field(default_factory=list)
     crowded: str = ""  # why it draws many applicants (large employer, applicant count), or ""
+    # Date this employer last had a job recorded (any time, tracker or archive), or "" for an
+    # employer never recorded. New employers rank first so the tracker keeps widening.
+    recorded_before: str = ""
+
+    @property
+    def new_employer(self) -> bool:
+        return not self.recorded_before
 
     def summary(self) -> dict:
         """The compact view the model scans; get_posting returns the full text."""
@@ -67,10 +74,10 @@ class Candidate:
             out["note"] = self.note
         if self.crowded:
             out["crowded"] = self.crowded
+        if self.recorded_before:
+            out["employer_recorded_before"] = self.recorded_before
         if self.board_key.startswith("mycareersfuture:"):
             out["apply_via"] = "employer's own posting needed; MyCareersFuture is citizens and PRs only"
-        if self.looks_stale:
-            out["stale_check"] = f"posted >{config.STALE_DAYS} days ago and names no current/future year"
         if not self.description:
             out["description"] = "none from the source; open the url to read it"
         return out
@@ -139,8 +146,16 @@ async def harvest_board(client, board: Board, known: set[str], sem: asyncio.Sema
     await asyncio.gather(*(enrich(p) for p in kept))
     dropped = Counter(p.extra["drop"] for p in kept if p.extra.get("drop"))
     kept = [p for p in kept if not p.extra.get("closed") and not p.extra.get("drop")]
+    candidates = [to_candidate(p, board) for p in kept]
+    # The staleness rule is mechanical (employer's own posting date past STALE_DAYS, no
+    # current or future start/intake/deadline named), so it is applied here rather than
+    # paid for in model turns: stale postings were about 40% of everything the model skipped.
+    stale = sum(1 for c in candidates if c.looks_stale)
+    if stale:
+        dropped[f"stale: posted over {config.STALE_DAYS} days ago, no future date named"] += stale
+        candidates = [c for c in candidates if not c.looks_stale]
     return BoardResult(board, ok=True, postings=len(postings),
-                       candidates=[to_candidate(p, board) for p in kept], dropped=dict(dropped))
+                       candidates=candidates, dropped=dict(dropped))
 
 
 async def harvest(boards: list[Board], known: set[str]) -> list[BoardResult]:
@@ -184,7 +199,8 @@ def crowd_reason(postings_on_board: int | None, applicants: int | None) -> str:
 
 def rank(candidates: list[Candidate]) -> list[Candidate]:
     """Market priority first, then freshness: fresh postings, then recent, then old.
-    Within each, crowded postings (large employers, many applicants) come after the rest.
+    Within each, crowded postings (large employers, many applicants) come after the rest,
+    and within those, employers already recorded on an earlier run come after new ones.
 
     Fresh postings are ordered best fit to the profile first: they are all new, and
     an early application is worth most there. Recent ones alternate between the best fit
@@ -193,7 +209,8 @@ def rank(candidates: list[Candidate]) -> list[Candidate]:
     """
     groups: dict[tuple, list[Candidate]] = {}
     for c in candidates:
-        groups.setdefault((filters.market_rank(c.market), freshness(c), bool(c.crowded)), []).append(c)
+        groups.setdefault((filters.market_rank(c.market), freshness(c), bool(c.crowded),
+                           not c.new_employer), []).append(c)
     out: list[Candidate] = []
     for key in sorted(groups):
         group = groups[key]

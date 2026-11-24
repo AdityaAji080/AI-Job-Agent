@@ -46,6 +46,9 @@ class Run:
         # Companies recorded recently are held back so others get the slots.
         self.cooling = store.recently_recorded(config.COMPANY_COOLDOWN_DAYS)
         self.held_back = Counter()  # company -> candidates left out because of the cooldown
+        # Every employer ever recorded, with its latest date: new employers are ranked first.
+        self.history = store.employer_history()
+        self._history_cache: dict[str, str] = {}
         self.recorded_crowded = 0
         # company name -> open roles on the company's own board, from the registry's last check.
         self.board_sizes: dict[str, int] = {}
@@ -62,6 +65,14 @@ class Run:
         size = max((n for name, n in self.board_sizes.items() if store.same_employer(name, company)),
                    default=None)
         return crowd_reason(size, applicants)
+
+    def last_recorded(self, company: str) -> str:
+        """The latest date this employer had a job recorded, ever, or "" if never."""
+        if company not in self._history_cache:
+            self._history_cache[company] = max(
+                (when for name, when in self.history.items() if store.same_employer(name, company)),
+                default="")
+        return self._history_cache[company]
 
     def cooling_since(self, company: str) -> str:
         """The date this employer last had a job recorded, if inside the cooldown, else ""."""
@@ -98,6 +109,7 @@ class Run:
                         del self.pool[other]
                     else:
                         continue
+                c.recorded_before = self.last_recorded(c.company)
                 self.pool[c.id] = c
                 self.by_role[rk] = c.id
         # Tag after every board is in: a board read later (or registered mid-run) can make
@@ -115,6 +127,43 @@ class Run:
 
 # Shorter than this is a summary or a fragment, not a posting a CV can be tailored from.
 MIN_POSTING_TEXT = 300
+
+
+def background_text() -> str:
+    """The candidate's background as the agent reads it.
+
+    Built from profile/cv_source.yaml when it exists, the same file every tailored CV comes
+    from, so the agent judges against everything the CVs can draw on and nothing goes out
+    of date in a second copy. profile/resume.md is the fallback for a profile without one.
+    Contact details are left out: the agent has no use for them.
+    """
+    if not config.CV_SOURCE_PATH.exists():
+        return config.RESUME_PATH.read_text(encoding="utf-8")
+    import yaml
+    src = yaml.safe_load(config.CV_SOURCE_PATH.read_text(encoding="utf-8")) or {}
+    out = [src.get("name", ""), src.get("headline", ""), ""]
+    if src.get("summary"):
+        out += ["Summary: " + " ".join(str(src["summary"]).split()), ""]
+    for group in src.get("skills") or []:
+        out.append(f"{group.get('label', 'Skills')}: {', '.join(map(str, group.get('items') or []))}")
+    for title, section in (("Experience", "experience"), ("Projects", "projects")):
+        entries = src.get(section) or []
+        if entries:
+            out += ["", title]
+        for e in entries:
+            head = " | ".join(str(x) for x in (e.get("title"), e.get("org") or e.get("venue"),
+                                               e.get("location"), e.get("dates")) if x)
+            out.append(f"- {head}")
+            out += [f"  - {' '.join(str(b.get('text', '')).split())}" for b in e.get("bullets") or []]
+    if src.get("education"):
+        out += ["", "Education"]
+    for ed in src.get("education") or []:
+        line = " | ".join(str(x) for x in (ed.get("degree"), ed.get("school"), ed.get("location"),
+                                           ed.get("dates")) if x)
+        if ed.get("coursework"):
+            line += f". Coursework: {', '.join(ed['coursework'])}"
+        out.append(f"- {line}")
+    return "\n".join(out).strip()
 
 
 def kickoff_start() -> str:
@@ -230,7 +279,8 @@ def build_tools(run: Run):
             if judged(market) >= config.MARKET_RELEASE_AFTER:
                 return False
             return any(c2.id not in batch_ids
-                       and company_used[store.company_key(c2.company)] < config.MAX_PER_COMPANY
+                       and sum(n for k, n in company_used.items()
+                               if store.same_employer(k, c2.company)) < config.MAX_PER_COMPANY
                        and not (c2.crowded and crowded_used >= config.MAX_CROWDED_PER_RUN)
                        for c2 in run.open_candidates(market))
         jobs, refused, no_text = [], [], []
@@ -291,7 +341,8 @@ def build_tools(run: Run):
                                           f"{config.MAX_CROWDED_PER_RUN}. Leave it undecided and "
                                           "look for a less contested employer"})
                 continue
-            if company_used[company] >= config.MAX_PER_COMPANY:
+            if sum(n for k, n in company_used.items()
+                   if store.same_employer(k, company)) >= config.MAX_PER_COMPANY:
                 refused.append({"role": job.get("role"),
                                 "reason": f"{job['company']} already has {config.MAX_PER_COMPANY} this run; "
                                           "leave its other roles undecided for a later run"})
@@ -427,9 +478,16 @@ def harvest_summary(run: Run) -> str:
     counts = run.market_counts()
     lines.append("- Pool by market: " + (", ".join(f"{m} {counts[m]}" for m in filters.MARKET_ORDER
                                                     if counts.get(m)) or "empty"))
+    stale = 0
     for r in ok:
         for reason, n in r.dropped.items():
+            if reason.startswith("stale"):
+                stale += n
+                continue
             lines.append(f"- Dropped from {r.board.company or r.board.slug}: {n} ({reason}).")
+    if stale:
+        lines.append(f"- Dropped as stale (posted over {config.STALE_DAYS} days ago on the employer's "
+                     f"own board, no current or future date named): {stale}.")
     if run.held_back:
         lines.append(f"- Held back (a job recorded in the last {config.COMPANY_COOLDOWN_DAYS} days): "
                      f"{sum(run.held_back.values())} candidates from "
@@ -524,10 +582,11 @@ async def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="harvest and print the pool; no model calls")
     args = ap.parse_args()
 
-    for path in (config.RESUME_PATH, config.CRITERIA_PATH):
-        if not path.exists():
-            print(f"Missing {path}. Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
-            return 2
+    if not config.CRITERIA_PATH.exists() or not (config.CV_SOURCE_PATH.exists()
+                                                 or config.RESUME_PATH.exists()):
+        print(f"Missing {config.CRITERIA_PATH} or a profile ({config.CV_SOURCE_PATH.name} or "
+              f"{config.RESUME_PATH.name}). Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
+        return 2
 
     if not args.dry_run:
         # Jobs marked applied (yes or no) leave the tracker for data/archive/ before
@@ -551,10 +610,9 @@ async def main() -> int:
 
     if args.dry_run:
         no_desc = sum(1 for c in run.pool.values() if not c.description)
-        stale = sum(1 for c in run.pool.values() if c.looks_stale)
-        print(f"- Without a description: {no_desc}. Flagged stale: {stale}.")
+        print(f"- Without a description: {no_desc}.")
         for c in run.open_candidates()[:60]:
-            flags = (" | STALE" if c.looks_stale else "") + ("" if c.description else " | NO DESCRIPTION")
+            flags = ("" if c.description else " | NO DESCRIPTION") + (" | NEW EMPLOYER" if c.new_employer else "")
             print(f"  [{c.market}] {c.company}: {c.title} | {c.location} | "
                   f"{c.posted or c.posted_note or 'undated'}{flags}")
         return 0
@@ -568,7 +626,7 @@ async def main() -> int:
         crowded_applicants=config.CROWDED_APPLICANTS, max_crowded=config.MAX_CROWDED_PER_RUN,
         sg_slots=config.market_slots().get("Singapore", 0), release_after=config.MARKET_RELEASE_AFTER,
         shares=", ".join(f"{m} {n}" for m, n in config.market_slots().items()),
-        resume=config.RESUME_PATH.read_text(encoding="utf-8"),
+        resume=background_text(),
         criteria=config.CRITERIA_PATH.read_text(encoding="utf-8"))
 
     server = create_sdk_mcp_server(name="jobs", version="2.0.0", tools=build_tools(run))
