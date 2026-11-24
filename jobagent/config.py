@@ -159,14 +159,21 @@ MARKET_TIERS = {
 # Detection order: for a multi-city listing, the first market that matches wins,
 # so this follows the priority tiers.
 MARKETS: list[tuple[str, re.Pattern]] = [
-    ("Singapore", re.compile(r"singapore", re.I)),
+    ("Singapore", re.compile(r"singapore|^\s*sg\s*$", re.I)),
     ("India", re.compile(
         # "Little India" is a district of Singapore, not the country.
         r"(?<!little )\bindia\b|bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|noida|hyderabad|"
-        r"pune|chennai|kochi|thiruvananthapuram|trivandrum|ahmedabad|kolkata", re.I)),
+        r"pune|chennai|kochi|thiruvananthapuram|trivandrum|ahmedabad|kolkata|"
+        r"thane|lucknow|jaipur|indore|coimbatore|mysore|mysuru|chandigarh|mohali|bhubaneswar|"
+        r"visakhapatnam|vadodara|nagpur|\bgoa\b|"
+        r"karnataka|maharashtra|telangana|tamil nadu|kerala|haryana|uttar pradesh|gujarat|"
+        r"\bind\b|^in-[a-z]{2}-", re.I)),
     ("Canada", re.compile(
         r"canada|toronto|vancouver|montr[eé]al|ottawa|waterloo|kitchener|calgary|edmonton|"
-        r"halifax|winnipeg|qu[eé]bec|victoria, bc|, ?(on|bc|ab|qc|ns|mb)\b", re.I)),
+        r"halifax|winnipeg|qu[eé]bec|victoria, bc|, ?(on|bc|ab|qc|ns|mb|sk|nb|nl)\b|"
+        r"ontario(?!,? ?(ca|california)\b)|british columbia|alberta|nova scotia|manitoba|saskatchewan|new brunswick|"
+        r"newfoundland|mississauga|markham|brampton|oakville|richmond hill|vaughan|kanata|"
+        r"burnaby|saskatoon|regina, sk|guelph|fredericton|moncton|\bcan\b$", re.I)),
     ("United States", re.compile(
         r"united states|\busa?\b|u\.s\.|americas|"
         r"san francisco|new york|seattle|boston|austin|los angeles|chicago|mountain view|"

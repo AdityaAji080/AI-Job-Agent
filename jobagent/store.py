@@ -81,9 +81,16 @@ def same_employer(a: str, b: str) -> bool:
     return wa <= wb or wb <= wa
 
 
+# Level words, so "Applied Scientist II" and "Applied Scientist III", or "Senior Staff" and
+# "Staff" versions of one role, count as the same job at that company.
+_LEVEL = re.compile(r"\b(senior|sr|staff|principal|lead|junior|jr|intermediate|mid|"
+                    r"i{1,3}|iv)\b")
+
+
 def role_key(company: str, role: str) -> str:
-    norm = lambda s: re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
-    return f"{company_key(company)}|{norm(role)}"
+    norm = re.sub(r"[^a-z0-9+#]+", " ", (role or "").lower())
+    norm = " ".join(_LEVEL.sub(" ", norm).split()) or " ".join(norm.split())
+    return f"{company_key(company)}|{norm}"
 
 
 def _read(path: Path) -> list[dict]:
@@ -214,6 +221,11 @@ def recently_recorded(days: int, today: date | None = None) -> dict[str, str]:
     return latest
 
 
+def employer_history() -> dict[str, str]:
+    """company_key -> the latest date a job of theirs was recorded, ever."""
+    return recently_recorded(100_000)
+
+
 def known_keys() -> set[str]:
     """Every posting already tracked or already judged; the harvester skips these."""
     return _with_aliases({job_key(j.get("url", "")) for j in read_jobs()} | {s["key"] for s in read_seen()})
@@ -260,20 +272,4 @@ def mark_seen(items: list[dict]) -> int:
                          "role": item.get("role", ""), "date": date.today().isoformat()})
     if rows:
         _append(config.SEEN_CSV, SEEN_COLUMNS, rows)
-    return len(rows)
-
-
-def migrate_jobs_csv(src: Path, dst: Path) -> int:
-    """Copy an old-format tracker (no market column) into the current format."""
-    from .filters import market_of
-    rows = _read(src)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with open(dst, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            row.setdefault("market", market_of(row.get("location", "")))
-            if not row.get("market"):
-                row["market"] = market_of(row.get("location", ""))
-            writer.writerow(row)
     return len(rows)

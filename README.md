@@ -71,9 +71,11 @@ flowchart LR
   been judged (or that runs out) gives its slots to the others, Singapore first; the US is
   capped. The rest wait in the pool.
 - **Many employers, few crowds.** A company is recorded at most once per run, and a company
-  that had a job recorded in the last 14 days is held back (its roles come back later).
+  that had a job recorded in the last `COMPANY_COOLDOWN_DAYS` (default 14) days is held back (its roles come back later).
   Postings from large employers (150+ open roles on their own board) or with 100+
   applicants are marked crowded, ranked after the rest, and capped at two per run.
+  Employers recorded on any earlier run rank after ones never recorded, and level
+  variants of one role ("Applied Scientist II" and "III") count as the same job.
   Discovery is aimed at employers most applicants never think of: scale-ups, SMEs,
   regional hubs, research institutes and industrial firms hiring for AI.
   A job listed both on a company's board and on MyCareersFuture is judged once.
@@ -113,11 +115,11 @@ Personal files live in a **separate private repository**, so this one can be pub
 1. **Create the private data repo** (for example `job-agent-data`) with this layout:
 
    ```
-   profile/resume.md      your resume, as plain text or markdown
+   profile/cv_source.yaml    your CV as structured data: what the agent judges against and
+                             the only source tailored CVs use (see example/profile)
    profile/criteria.md    what you want, and the skip list (see example/profile)
    profile/fit_keywords.txt  optional: weighted keywords that put the best-fitting jobs first
-   profile/cv_source.yaml    your CV as structured data, the only source tailored CVs use
-                             (see example/profile/cv_source.yaml)
+   profile/resume.md      optional: plain-text resume, used only when there is no cv_source.yaml
    data/                  created on the first run
    ```
 
