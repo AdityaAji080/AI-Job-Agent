@@ -253,3 +253,22 @@ Harvest results:
 {harvest_summary}
 
 {start}"""
+
+DISCOVERY_KICKOFF = """This is the discovery session of today's run. A first session has already
+judged the pools; this session's budget is reserved for finding new employers.
+
+State of the run:
+- Jobs recorded today: {recorded} of {max_new}; remaining slots: {remaining}.
+- Boards registered today: {registered}.
+- Boards in the registry by market of their open roles: {registry_markets}.
+
+Do step B for **India first, then Canada**, then Singapore if budget remains. India and
+Canada have the fewest registered employers, so their pools keep offering the same
+companies. Aim for at least three `find_boards` calls each, with names that are not
+famous AI labs or big-tech firms: scale-ups, SMEs, global capability centres and
+engineering hubs, fintech, industrial, automotive, semiconductor, healthcare and
+logistics firms hiring for AI or real-time systems. Register every board you confirm.
+
+Judge the new candidates `register_board` returns only while slots remain, exactly as
+in step A. Skip step C. Finish with a short summary of the boards you registered per
+market and any names that had no supported board."""

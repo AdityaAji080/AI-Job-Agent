@@ -137,7 +137,10 @@ Personal files live in a **separate private repository**, so this one can be pub
      100), `MAX_CROWDED_PER_RUN` (default 2), `COVER_LETTERS` (default `when_required`;
      or `when_asked`, `unless_declined`), `MARKET_SHARES` (default
      `Singapore=0.6,India=0.2,Canada=0.2`), `MARKET_RELEASE_AFTER` (default 15: candidates
-     judged in a market before its unfilled share goes to the others), `JOBAGENT_MODEL` (default `sonnet`; set to
+     judged in a market before its unfilled share goes to the others), `DISCOVERY_RESERVE`
+     (default 0.3: share of the budget kept for a second, India- and Canada-first discovery
+     session), `BOARD_RETIRE_AFTER` (default 300: a board is disabled after this many pool
+     candidates with none recorded; 0 turns it off), `JOBAGENT_MODEL` (default `sonnet`; set to
      `opus` for the larger model)
      and `MAX_TAILOR` (default 40: CVs tailored per scheduled run)
 

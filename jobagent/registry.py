@@ -102,6 +102,20 @@ class Registry:
             if int(e.failures) >= config.MAX_BOARD_FAILURES:
                 e.enabled = "no"
 
+    def retire_if_unproductive(self, key: str, recorded_elsewhere: bool = False) -> bool:
+        """Disable a board that has fed BOARD_RETIRE_AFTER candidates into the pool without
+        one recorded job. MyCareersFuture is never retired, nor a board whose employer has a
+        job recorded by another route. Returns True when it was disabled now."""
+        e = self.entries.get(key)
+        limit = config.BOARD_RETIRE_AFTER
+        if (not e or limit <= 0 or e.enabled != "yes" or e.ats == "mycareersfuture"
+                or recorded_elsewhere or int(e.recorded_total or 0) > 0
+                or int(e.candidates_total or 0) < limit):
+            return False
+        e.enabled = "no"
+        e.last_status = f"retired: {e.candidates_total} candidates, none recorded"
+        return True
+
     def record_recorded(self, key: str, n: int = 1) -> None:
         if key in self.entries:
             e = self.entries[key]

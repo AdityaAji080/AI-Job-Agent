@@ -115,3 +115,86 @@ def test_background_comes_from_cv_source(tmp_path, monkeypatch):
     resume.write_text("Plain resume", encoding="utf-8")
     monkeypatch.setattr(config, "RESUME_PATH", resume)
     assert agent.background_text() == "Plain resume"
+
+
+# ---------------------------------------------------------------- unproductive boards
+
+def test_boards_that_never_pay_off_are_retired(tmp_path, monkeypatch):
+    from jobagent.harvest import BoardResult, to_candidate
+    run, _ = setup_run(tmp_path, monkeypatch, n=0)
+    monkeypatch.setattr(config, "BOARD_RETIRE_AFTER", 3)
+    store.mark_seen([{"url": "https://k.com/1", "decision": "recorded", "company": "Kept Co"}])
+    run = agent.Run(agent.Registry([]))
+    boards = {name: Board("lever", name.lower().replace(" ", ""), name)
+              for name in ("Dead", "Paying", "Kept Co", "Young")}
+    for b in boards.values():
+        run.registry.add(b, b.company)
+    run.registry.record_recorded(boards["Paying"].key)
+
+    def feed(board, n):
+        posts = [Posting("lever", board.slug, board.company, f"{board.slug}{i}", "ML Engineer",
+                         f"https://x.com/{board.slug}/{i}", location="Singapore") for i in range(n)]
+        run.absorb([BoardResult(board, ok=True, postings=n, candidates=[to_candidate(p, board) for p in posts])])
+
+    for name in ("Dead", "Paying", "Kept Co"):
+        feed(boards[name], 3)
+    feed(boards["Young"], 2)
+    enabled = {e.company: e.enabled for e in run.registry.entries.values()}
+    assert enabled == {"Dead": "no", "Paying": "yes", "Kept Co": "yes", "Young": "yes"}
+    assert run.retired == ["Dead"] and "Dead" in agent.harvest_summary(run)
+    monkeypatch.setattr(config, "BOARD_RETIRE_AFTER", 0)
+    assert not run.registry.retire_if_unproductive(boards["Young"].key)
+
+
+# ---------------------------------------------------------------- reserved discovery budget
+
+class _Result:
+    def __init__(self, cost, turns, subtype="success"):
+        self.total_cost_usd, self.num_turns, self.subtype = cost, turns, subtype
+
+
+def _fake_sessions(monkeypatch, costs):
+    calls = []
+
+    async def fake(prompt, options):
+        calls.append((prompt, options.max_budget_usd))
+        return f"summary {len(calls)}", _Result(costs[len(calls) - 1], 10)
+    monkeypatch.setattr(agent, "_session", fake)
+    return calls
+
+
+@pytest.mark.parametrize("judging_cost,discovery", [(1.2, True), (2.9, False)])
+def test_budget_is_split_between_judging_and_discovery(tmp_path, monkeypatch, judging_cost, discovery):
+    import csv
+    home = tmp_path / "home"
+    (home / "profile").mkdir(parents=True)
+    (home / "profile" / "criteria.md").write_text("criteria", encoding="utf-8")
+    (home / "profile" / "resume.md").write_text("resume", encoding="utf-8")
+    for attr, rel in [("HOME", ""), ("DATA_DIR", "data"), ("PROFILE_DIR", "profile")]:
+        monkeypatch.setattr(config, attr, home / rel)
+    for attr, rel in [("JOBS_CSV", "data/jobs.csv"), ("SEEN_CSV", "data/seen.csv"),
+                      ("BOARDS_CSV", "data/boards.csv"), ("RUNS_CSV", "data/runs.csv"),
+                      ("CRITERIA_PATH", "profile/criteria.md"), ("RESUME_PATH", "profile/resume.md"),
+                      ("CV_SOURCE_PATH", "profile/none.yaml")]:
+        monkeypatch.setattr(config, attr, home / rel)
+    monkeypatch.setattr(config, "MAX_BUDGET_USD", 3.0)
+    monkeypatch.setattr(config, "DISCOVERY_RESERVE", 0.3)
+    monkeypatch.setattr(agent.Registry, "load", classmethod(lambda cls: cls([])))
+
+    async def no_harvest(boards, known):
+        return []
+    monkeypatch.setattr(agent, "harvest", no_harvest)
+    monkeypatch.setattr("sys.argv", ["agent"])
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    calls = _fake_sessions(monkeypatch, [judging_cost, 0.8])
+    assert asyncio.run(agent.main()) == 0
+    assert calls[0][1] == pytest.approx(2.1)
+    assert len(calls) == (2 if discovery else 1)
+    row = list(csv.DictReader(open(config.RUNS_CSV, encoding="utf-8")))[-1]
+    if discovery:
+        assert calls[1][1] == pytest.approx(3.0 - judging_cost)
+        assert "discovery session" in calls[1][0] and "India first" in calls[1][0]
+        assert row["cost_usd"] == f"{judging_cost + 0.8:.2f}" and row["turns"] == "20"
+        assert "Discovery session: summary 2" in row["summary"]
+    else:
+        assert row["cost_usd"] == f"{judging_cost:.2f}" and row["outcome"] == "success"
