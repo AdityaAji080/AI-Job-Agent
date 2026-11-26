@@ -1,5 +1,5 @@
 """The instructions the model runs with. Profile-specific content comes from
-profile/cv_source.yaml (or resume.md) and profile/criteria.md; this file only describes
+profile/cv_source.yaml and profile/criteria.md; this file only describes
 the workflow."""
 from __future__ import annotations
 

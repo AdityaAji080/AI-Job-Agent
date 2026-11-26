@@ -247,7 +247,7 @@ def test_a_company_recorded_recently_is_held_back(tmp_path, monkeypatch):
                      {"url": "https://b.com/1", "decision": "recorded", "company": "Stripe"}])
     rows = config.SEEN_CSV.read_text().replace(date.today().isoformat(), recent, 1)
     config.SEEN_CSV.write_text(rows.replace(date.today().isoformat(), old, 1))
-    run = agent.Run(run_registry := agent.Registry([]))
+    run = agent.Run(agent.Registry([]))
     tools = agent.build_tools(run)
     _board_pool(run, Board("lever", "grab"), [("Grab", "ML Engineer", "Singapore")])
     _board_pool(run, Board("lever", "stripe"), [("Stripe", "ML Engineer", "Singapore")])
@@ -263,7 +263,7 @@ def test_crowded_postings_rank_last_and_are_capped(tmp_path, monkeypatch):
     run, tools = setup_run(tmp_path, monkeypatch, n=0)
     monkeypatch.setattr(config, "MAX_NEW_JOBS", 10)
     monkeypatch.setattr(config, "MAX_PER_COMPANY", 10)
-    _board_pool(run, Board("lever", "big"), [(f"BigCo", f"ML Engineer {i}", "Singapore") for i in range(3)],
+    _board_pool(run, Board("lever", "big"), [("BigCo", f"ML Engineer {i}", "Singapore") for i in range(3)],
                 postings=900)
     _board_pool(run, Board("lever", "small"), [("SmallCo", "ML Engineer", "Singapore")], postings=12)
     _board_pool(run, Board("mycareersfuture", "sg"), [("Popular Pte Ltd", "AI Engineer", "Singapore")],

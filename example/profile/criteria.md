@@ -9,11 +9,10 @@ Years of experience are not a filter; record them in the experience column. Skip
 
 ## Markets and work authorization
 
-In priority order:
-1. India — no sponsorship needed.
-2. Canada — no sponsorship needed.
-3. Singapore — needs an Employment Pass from the employer.
-4. United States — needs employer paperwork; skip if the listing requires citizenship.
+In priority order (the run's slots are split by `MARKET_SHARES`):
+1. Singapore — needs an Employment Pass from the employer.
+2. India and Canada, equally — no sponsorship needed.
+3. United States — needs employer paperwork; skip if the listing requires citizenship.
 
 ## Skip only for these
 
@@ -27,7 +26,3 @@ In priority order:
 ## Where to look
 
 LLM tooling, model evaluation, applied AI, computer vision in production.
-
-## Limit
-
-At most 25 new jobs per run.

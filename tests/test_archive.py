@@ -136,7 +136,7 @@ def test_jobs_marked_no_leave_the_tracker_and_their_cvs_are_deleted(data):
 
 
 def test_a_cv_finishing_after_its_job_was_turned_down_is_deleted(data):
-    url = track(1, tailored=False, applied="no")
+    track(1, tailored=False, applied="no")
     archive.archive_marked()
     late = data / "applications" / out_dir_for(store.read_declined()[0]).name
     late.mkdir(parents=True)

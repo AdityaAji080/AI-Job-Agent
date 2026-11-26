@@ -15,8 +15,8 @@ from collections import Counter
 from dataclasses import replace
 from datetime import date
 
-from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock,
-                              create_sdk_mcp_server, query, tool)
+from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ProcessError, ResultMessage,
+                              TextBlock, create_sdk_mcp_server, query, tool)
 
 from . import archive, config, filters, postings, store
 from .ats import detect_board, unsupported_system
@@ -139,11 +139,8 @@ def background_text() -> str:
 
     Built from profile/cv_source.yaml when it exists, the same file every tailored CV comes
     from, so the agent judges against everything the CVs can draw on and nothing goes out
-    of date in a second copy. profile/resume.md is the fallback for a profile without one.
-    Contact details are left out: the agent has no use for them.
+    of date in a second copy. Contact details are left out: the agent has no use for them.
     """
-    if not config.CV_SOURCE_PATH.exists():
-        return config.RESUME_PATH.read_text(encoding="utf-8")
     import yaml
     src = yaml.safe_load(config.CV_SOURCE_PATH.read_text(encoding="utf-8")) or {}
     out = [src.get("name", ""), src.get("headline", ""), ""]
@@ -594,10 +591,9 @@ async def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="harvest and print the pool; no model calls")
     args = ap.parse_args()
 
-    if not config.CRITERIA_PATH.exists() or not (config.CV_SOURCE_PATH.exists()
-                                                 or config.RESUME_PATH.exists()):
-        print(f"Missing {config.CRITERIA_PATH} or a profile ({config.CV_SOURCE_PATH.name} or "
-              f"{config.RESUME_PATH.name}). Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
+    if not config.CRITERIA_PATH.exists() or not config.CV_SOURCE_PATH.exists():
+        print(f"Missing {config.CRITERIA_PATH} or {config.CV_SOURCE_PATH}. "
+              "Set JOBAGENT_HOME to your private folder.", file=sys.stderr)
         return 2
 
     if not args.dry_run:
@@ -677,18 +673,32 @@ async def main() -> int:
     return 0
 
 
+# Result subtypes that mean a session ran out of budget or turns, not that it broke.
+LIMIT_SUBTYPES = {"error_max_budget_usd", "error_max_turns"}
+
+
 async def _session(prompt: str, options: ClaudeAgentOptions) -> tuple[str, ResultMessage | None]:
-    """One agent session; returns its last text and its result message."""
+    """One agent session; returns its last text and its result message.
+
+    Reaching the budget or turn limit is a normal end, not a failure: the CLI reports it
+    as an error result and exits 1, and newer SDKs then raise ResultError. Everything the
+    session recorded is already saved, so that exception is swallowed and the result kept.
+    """
     final_text, result = "", None
-    async for msg in query(prompt=prompt, options=options):
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if isinstance(block, TextBlock) and block.text.strip():
-                    print(block.text, flush=True)
-                    final_text = block.text
-        elif isinstance(msg, ResultMessage):
-            result = msg
-            print(f"\nCost: ${msg.total_cost_usd or 0:.2f}  Turns: {msg.num_turns}  ({msg.subtype})")
+    try:
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and block.text.strip():
+                        print(block.text, flush=True)
+                        final_text = block.text
+            elif isinstance(msg, ResultMessage):
+                result = msg
+                print(f"\nCost: ${msg.total_cost_usd or 0:.2f}  Turns: {msg.num_turns}  ({msg.subtype})")
+    except ProcessError:
+        if result is None or result.subtype not in LIMIT_SUBTYPES:
+            raise
+        print(f"Session stopped at its limit ({result.subtype}); continuing.", flush=True)
     return final_text, result
 
 

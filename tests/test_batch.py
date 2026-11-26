@@ -292,7 +292,7 @@ def test_a_404_on_the_posting_itself_is_closed(monkeypatch):
 
 # ---------------------------------------------------------------- cover letters
 
-from tests.test_tailor import LETTER, WANTS  # noqa: E402
+from tests.test_tailor import LETTER, WANTS
 
 
 def wants_letter_cv():
