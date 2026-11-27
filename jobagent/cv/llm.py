@@ -15,6 +15,7 @@ import os
 import yaml
 
 from . import content, prompts
+from .render import page_budget_text
 
 DRAFT_MODEL = os.environ.get("TAILOR_DRAFT_MODEL", "claude-opus-5-5")
 REVIEW_MODEL = os.environ.get("TAILOR_REVIEW_MODEL", "claude-sonnet-5-5")
@@ -105,7 +106,7 @@ def source_text(source: dict) -> str:
 
 def _system(template: str, source: dict, **extra) -> list[dict]:
     text = template.format(
-        source=source_text(source), max_pages=(source.get("layout") or {}).get("max_pages", 1),
+        source=source_text(source), max_pages=page_budget_text(source),
         max_bullets=content.MAX_BULLETS_PER_ENTRY, bullet_words=content.BULLET_MAX_WORDS,
         summary_words=content.SUMMARY_MAX_WORDS, max_searches=RESEARCH_SEARCHES, **extra)
     # Identical for every job, so the prefix is cached across a run.
@@ -114,8 +115,9 @@ def _system(template: str, source: dict, **extra) -> list[dict]:
 
 def _posting_block(posting: dict) -> str:
     text = posting["text"][:POSTING_CHARS]
+    market = f"Market: {posting['market']}\n" if posting.get("market") else ""
     return (f"<posting>\nCompany: {posting.get('company', '')}\nRole: {posting.get('role', '')}\n"
-            f"URL: {posting.get('url', '')}\n\n{text}\n</posting>")
+            f"{market}URL: {posting.get('url', '')}\n\n{text}\n</posting>")
 
 
 def _cv_json(cv: dict) -> str:

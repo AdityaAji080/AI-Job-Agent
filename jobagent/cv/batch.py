@@ -172,7 +172,7 @@ async def _prepare(rows: list[dict], need: int, log) -> tuple[list[dict], dict, 
                 saved = postings.load(url)
         if saved and saved["text"]:
             return "ready", {"url": url, "company": company or saved["company"],
-                             "role": role or saved["role"]}
+                             "role": role or saved["role"], "market": row.get("market", "")}
         return "missing", row
 
     for start in range(0, len(rows), PREPARE_CONCURRENCY * 2):
@@ -198,7 +198,8 @@ def _company_id(company: str) -> str:
 
 def _posting(job: dict) -> dict:
     saved = postings.load(job["url"]) or {"text": ""}
-    return {"url": job["url"], "company": job["company"], "role": job["role"], "text": saved["text"]}
+    return {"url": job["url"], "company": job["company"], "role": job["role"],
+            "market": job.get("market", ""), "text": saved["text"]}
 
 
 def build_requests(state: dict, source: dict) -> tuple[list[dict], dict]:
@@ -368,7 +369,7 @@ def advance_local(state: dict, source: dict, results: dict, log) -> None:
         if job["stage"] == "render":
             if not problems:  # arrived here via the letter stages: record the CV's warnings too
                 problems = check_content(source, job["cv"])
-            pdf, pdf_problems = build(source, job["cv"], out)
+            pdf, pdf_problems = build(source, job["cv"], out, market=job.get("market", ""))
             problems += pdf_problems
             if pdf is None or any(p.level == "error" for p in problems):
                 job["stage"], job["error"] = "failed", "PDF checks failed"

@@ -424,7 +424,7 @@ def test_a_letter_no_longer_wanted_is_skipped_mid_way(data, monkeypatch):
     monkeypatch.setattr(config, "COVER_LETTERS", "when_required")
     requests, _ = batch.build_requests(state, SOURCE)
     assert [r["custom_id"].split("-")[0] for r in requests] == ["letter"]  # before advancing
-    monkeypatch.setattr(batch, "build", lambda source, cv, out: (None, []))  # no LaTeX needed
+    monkeypatch.setattr(batch, "build", lambda source, cv, out, **kw: (None, []))  # no LaTeX needed
     batch.advance_local(state, SOURCE, {"tailored": [], "failed": []}, log=lambda *_: None)
     assert pid not in state["jobs"] or state["jobs"][pid]["stage"] != "letter"
     assert batch.build_requests(state, SOURCE)[0] == []

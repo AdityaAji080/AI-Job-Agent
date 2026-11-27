@@ -2,7 +2,7 @@
 
 A scheduled job-search agent that reads company job boards directly, has Claude judge
 each opening against a written set of criteria, keeps a deduplicated tracker that grows a
-little every run, and writes a tailored, one-page CV for every job it records, plus a
+little every run, and writes a tailored CV (one or two pages, by market) for every job it records, plus a
 cover letter when the posting requires one.
 
 It runs every morning on GitHub Actions, recording a handful of jobs a day with the freshest
@@ -266,21 +266,30 @@ in the same format and makes the checks deterministic:
 - **Content, before rendering:** every bullet names the source bullet it came from and
   may only use numbers from that bullet (or its entry's header); skills and coursework
   must exist in the source; every role must appear; summary and bullets have word limits.
-- **The PDF, after rendering:** it compiles; it fits `layout.max_pages`; the last page
-  isn't a near-empty spill-over; name, email, phone and every bullet are readable in the
-  text layer, which is what applicant-tracking systems parse.
-- **Layout choices:** the model may put Projects before Experience for research-heavy
-  roles (jobs always stay in date order), and may pick a headline from your
-  `headline_options`; anything else is rejected.
+- **The PDF, after rendering:** it compiles; it fits its page limit; name, email, phone
+  and every bullet are readable in the text layer, which is what applicant-tracking
+  systems parse.
+- **Page limit and paper:** `layout.max_pages` and `layout.paper` (`letter` or `a4`) set
+  the defaults, and `layout.markets` overrides them per market, so a CV can be two A4
+  pages for Singapore and one Letter page for the US. The model is told to make the case
+  on page 1 and use page 2 only for supporting material that serves the posting; a
+  second page doesn't have to be full.
+- **Layout choices:** projects marked `section: research` print under their own
+  Research heading (`layout.section_titles` renames headings). The model picks which
+  block leads after the skills: Experience, Projects or Research (jobs always stay in
+  date order), and may pick a headline from your `headline_options`; anything else is
+  rejected.
 - **Fitting:** a CV over its page limit loses its least important bullet (the model lists
-  them most-relevant first) until it fits, and every removal is reported.
+  them most-relevant first) until it fits. A last page holding only a few stray lines
+  loses up to two bullets to pull them back onto the page before. Every removal is
+  reported.
 
 All model text is LaTeX-escaped, so nothing in a posting or a model reply can act as a
 LaTeX command.
 
 ```bash
 python -m jobagent.cv baseline --out out/          # your full CV, every bullet
-python -m jobagent.cv check tailored.json --out out/
+python -m jobagent.cv check tailored.json --out out/ --market Singapore
 ```
 
 Needs `pdflatex` with `texlive-latex-extra` and `texlive-fonts-recommended`.

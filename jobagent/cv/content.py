@@ -28,8 +28,11 @@ SUMMARY_MAX_WORDS = 60
 BULLET_MAX_WORDS = 42
 MAX_BULLETS_PER_ENTRY = 6
 MIN_BULLETS_PER_ROLE = 1
-# Research-heavy roles read better with the paper first; experience stays chronological.
-SECTION_ORDERS = ("experience_first", "projects_first")
+# Which block leads after the skills. Experience stays chronological inside its block.
+# A source project with `section: research` goes in a separate Research block; every
+# other project goes in Projects.
+SECTION_ORDERS = ("experience_first", "projects_first", "research_first")
+PROJECT_SECTIONS = ("projects", "research")
 
 
 @dataclass
@@ -49,6 +52,9 @@ def load_source(path: Path) -> dict:
             ids = [b["id"] for b in entry.get("bullets") or []]
             if len(ids) != len(set(ids)):
                 raise ValueError(f"duplicate bullet id in {section}.{entry['id']}")
+    for entry in data.get("projects") or []:
+        if entry.get("section", "projects") not in PROJECT_SECTIONS:
+            raise ValueError(f"projects.{entry['id']}: section must be one of {', '.join(PROJECT_SECTIONS)}")
     return data
 
 
