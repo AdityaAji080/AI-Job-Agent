@@ -4,7 +4,7 @@ import asyncio
 import httpx
 import pytest
 
-from jobagent import agent, config, postings, store
+from jobagent import config, postings, store
 from jobagent.ats import Board
 from jobagent.cv import batch
 from tests.test_agent_tools import _pool, call, setup_run

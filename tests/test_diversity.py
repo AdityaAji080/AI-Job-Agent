@@ -110,11 +110,6 @@ def test_background_comes_from_cv_source(tmp_path, monkeypatch):
                  "Paper | ICLR", "MSc | NTU. Coursework: CV"):
         assert part in text
     assert "a@b.c" not in text
-    monkeypatch.setattr(config, "CV_SOURCE_PATH", tmp_path / "missing.yaml")
-    resume = tmp_path / "resume.md"
-    resume.write_text("Plain resume", encoding="utf-8")
-    monkeypatch.setattr(config, "RESUME_PATH", resume)
-    assert agent.background_text() == "Plain resume"
 
 
 # ---------------------------------------------------------------- unproductive boards
@@ -169,13 +164,13 @@ def test_budget_is_split_between_judging_and_discovery(tmp_path, monkeypatch, ju
     home = tmp_path / "home"
     (home / "profile").mkdir(parents=True)
     (home / "profile" / "criteria.md").write_text("criteria", encoding="utf-8")
-    (home / "profile" / "resume.md").write_text("resume", encoding="utf-8")
+    (home / "profile" / "cv_source.yaml").write_text("name: A\nheadline: ML Engineer\n", encoding="utf-8")
     for attr, rel in [("HOME", ""), ("DATA_DIR", "data"), ("PROFILE_DIR", "profile")]:
         monkeypatch.setattr(config, attr, home / rel)
     for attr, rel in [("JOBS_CSV", "data/jobs.csv"), ("SEEN_CSV", "data/seen.csv"),
                       ("BOARDS_CSV", "data/boards.csv"), ("RUNS_CSV", "data/runs.csv"),
-                      ("CRITERIA_PATH", "profile/criteria.md"), ("RESUME_PATH", "profile/resume.md"),
-                      ("CV_SOURCE_PATH", "profile/none.yaml")]:
+                      ("CRITERIA_PATH", "profile/criteria.md"),
+                      ("CV_SOURCE_PATH", "profile/cv_source.yaml")]:
         monkeypatch.setattr(config, attr, home / rel)
     monkeypatch.setattr(config, "MAX_BUDGET_USD", 3.0)
     monkeypatch.setattr(config, "DISCOVERY_RESERVE", 0.3)
@@ -198,3 +193,29 @@ def test_budget_is_split_between_judging_and_discovery(tmp_path, monkeypatch, ju
         assert "Discovery session: summary 2" in row["summary"]
     else:
         assert row["cost_usd"] == f"{judging_cost:.2f}" and row["outcome"] == "success"
+
+
+def _fake_query(monkeypatch, subtype):
+    """query() as the SDK runs it: a reply, an error result, then the CLI's exit 1."""
+    from claude_agent_sdk import AssistantMessage, ProcessError, ResultMessage, TextBlock
+
+    async def fake(prompt, options):
+        yield AssistantMessage(content=[TextBlock(text="Recorded 7 jobs.")], model="sonnet")
+        yield ResultMessage(subtype=subtype, duration_ms=1, duration_api_ms=1, is_error=True,
+                            num_turns=58, session_id="s", total_cost_usd=2.54)
+        raise ProcessError("Claude Code returned an error result", exit_code=1)
+    monkeypatch.setattr(agent, "query", fake)
+
+
+@pytest.mark.parametrize("subtype", ["error_max_budget_usd", "error_max_turns"])
+def test_reaching_a_limit_ends_the_session_normally(monkeypatch, subtype):
+    _fake_query(monkeypatch, subtype)
+    text, result = asyncio.run(agent._session("go", None))
+    assert text == "Recorded 7 jobs." and result.subtype == subtype and result.total_cost_usd == 2.54
+
+
+def test_other_session_errors_still_fail(monkeypatch):
+    from claude_agent_sdk import ProcessError
+    _fake_query(monkeypatch, "error_during_execution")
+    with pytest.raises(ProcessError):
+        asyncio.run(agent._session("go", None))

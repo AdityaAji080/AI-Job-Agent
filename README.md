@@ -3,7 +3,7 @@
 A scheduled job-search agent that reads company job boards directly, has Claude judge
 each opening against a written set of criteria, keeps a deduplicated tracker that grows a
 little every run, and writes a tailored, one-page CV for every job it records, plus a
-cover letter unless the posting asks you not to send one.
+cover letter when the posting requires one.
 
 It runs every morning on GitHub Actions, recording a handful of jobs a day with the freshest
 postings first, and needs no machine left on. See [What it costs](#what-it-costs).
@@ -59,7 +59,8 @@ flowchart LR
   sentences that state experience or PhD requirements, and opens the full posting only
   when the summary doesn't settle it. Every decision is written down, so nothing is judged
   twice.
-- **The registry learns.** The model's remaining budget goes on discovery. It names
+- **The registry learns.** A share of the budget (`DISCOVERY_RESERVE`, 30% by default)
+  is kept for a second, discovery-only session, India first, then Canada. It names
   employers in each market, and `find_boards` checks each name against six job-board
   systems' APIs by trying likely slugs (web `site:` searches mostly return aggregators, so
   they're a fallback). A confirmed board is registered and harvested on the spot and on every
@@ -67,11 +68,12 @@ flowchart LR
   use up the run's job slots, so it continues after they're full.
 - **No single source dominates.** Singapore comes first, then India and Canada as equals.
   Each has a share of the run's slots (by default Singapore 60%, India and Canada 20% each:
-  3, 1 and 1 of 5). A market that hasn't filled its share after 15 of its candidates have
+  4, 1 and 1 of 6). A market that hasn't filled its share after 15 of its candidates have
   been judged (or that runs out) gives its slots to the others, Singapore first; the US is
   capped. The rest wait in the pool.
 - **Many employers, few crowds.** A company is recorded at most once per run, and a company
-  that had a job recorded in the last `COMPANY_COOLDOWN_DAYS` (default 14) days is held back (its roles come back later).
+  that had a job recorded in the last `COMPANY_COOLDOWN_DAYS` (default 14) days is held
+  back (its roles come back later).
   Postings from large employers (150+ open roles on their own board) or with 100+
   applicants are marked crowded, ranked after the rest, and capped at two per run.
   Employers recorded on any earlier run rank after ones never recorded, and level
@@ -86,7 +88,7 @@ flowchart LR
   second job tailors a CV per new job: a model selects and rewords bullets from your CV
   source, a second model reviews it as the hiring manager would, and deterministic checks
   reject any number, skill or role the source doesn't contain. A cover letter is written
-  the same way, on the finished CV, unless the posting declines one. See
+  the same way, on the finished CV, when the posting requires one. See
   [Tailored CVs](#tailored-cvs).
 
 ## Project layout
@@ -105,7 +107,7 @@ jobagent/
   postings.py     saved posting text, and re-reading a posting from its job board
   cv/             tailored CVs: model requests, batch runs, content rules, LaTeX template, PDF checks
 tests/            adapters, filters, dedup, the agent's tools, and CV tailoring (no network or API needed)
-example/profile/  sample resume, criteria and CV source
+example/profile/  sample CV source, criteria and fit keywords
 ```
 
 ## Setup
@@ -117,10 +119,9 @@ Personal files live in a **separate private repository**, so this one can be pub
    ```
    profile/cv_source.yaml    your CV as structured data: what the agent judges against and
                              the only source tailored CVs use (see example/profile)
-   profile/criteria.md    what you want, and the skip list (see example/profile)
+   profile/criteria.md       what you want, and the skip list (see example/profile)
    profile/fit_keywords.txt  optional: weighted keywords that put the best-fitting jobs first
-   profile/resume.md      optional: plain-text resume, used only when there is no cv_source.yaml
-   data/                  created on the first run
+   data/                     created on the first run
    ```
 
 2. **Create a fine-grained access token** at GitHub → Settings → Developer settings →
@@ -208,7 +209,7 @@ For each posting there are five steps, each a single API request:
 
 **Automatically, after every scheduled search**, a second job tailors CVs for tracked jobs
 that don't have one yet (status `new`, not applied to), newest first, up to `MAX_TAILOR`
-per run. It sends the same requests through the Batch API at half price, about $0.07–0.10
+per run. It sends the same requests through the Batch API at half price, about $0.07–0.14
 per CV. Just before tailoring, each posting is re-read from its job board, and one that
 has closed is skipped. A batch still running when the job's time runs out is collected by
 the next run.
@@ -312,7 +313,7 @@ away without a search: `python -m jobagent.archive`.
 | --- | --- |
 | `jobs.csv` | The tracker. `status` and `applied` are yours to edit. The agent only appends rows; CV tailoring fills in each row's `cv` and `cover_letter` columns. A job is tailored while its `status` is `new` and `applied` is blank. |
 | `seen.csv` | Every posting judged, with the decision and the reason. Delete a row to have it judged again. |
-| `boards.csv` | The registry. Set `enabled` to `no` to stop reading a board. A board that fails three runs in a row disables itself. |
+| `boards.csv` | The registry. Set `enabled` to `no` to stop reading a board. A board that fails three runs in a row disables itself, and so does one that has fed `BOARD_RETIRE_AFTER` candidates without a job recorded. |
 | `runs.csv` | One line per run: boards read, pool size, recorded, skipped, cost. |
 | `postings/` | The text of each recorded posting, saved when it was recorded. |
 | `applications/` | Tailored CVs and cover letters, one folder per posting. |
@@ -328,11 +329,12 @@ Anthropic API is the only cost:
 | | Per run | Per week (7 runs) |
 | --- | --- | --- |
 | Job search | up to `MAX_BUDGET_USD` ($2 by default) | up to $14 |
-| CV tailoring, Batch API | about $0.07–0.10 per CV, one per job recorded (6 by default) | about $3–4 |
-| Cover letters, Batch API | about $0.05–0.08 each, for every job unless the posting declines one | about $2–4 |
+| CV tailoring, Batch API | about $0.07–0.14 per CV, one per job recorded (6 by default) | about $3–6 |
+| Cover letters, Batch API | about $0.05–0.08 each, only where the posting requires one (by default) | usually under $1 |
 
-The pools are judged before discovery, so a tight budget trims discovery (finding new
-boards) first.
+The judging session gets 70% of the search budget and a discovery-only session the rest
+(`DISCOVERY_RESERVE`). A session that reaches its share simply stops; what it recorded is
+kept.
 
 Tailoring a job by hand (the Tailor CVs workflow with URLs, or `tailor` locally) skips the
 batch discount: about $0.15 per CV. The `cost_usd` column of `data/runs.csv` has each

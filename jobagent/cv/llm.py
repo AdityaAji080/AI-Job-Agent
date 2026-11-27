@@ -211,7 +211,7 @@ def reply_json(message) -> dict:
     try:
         data = json.loads(text)
     except ValueError:
-        raise TailorError(f"reply was not JSON (stop_reason: {stop}): {text[:120]!r}")
+        raise TailorError(f"reply was not JSON (stop_reason: {stop}): {text[:120]!r}") from None
     if not isinstance(data, dict):
         raise TailorError("reply JSON was not an object")
     return data

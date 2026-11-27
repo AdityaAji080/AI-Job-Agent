@@ -49,7 +49,7 @@ class Registry:
         self.entries = {e.key: e for e in entries}
 
     @classmethod
-    def load(cls) -> "Registry":
+    def load(cls) -> Registry:
         entries = []
         if config.BOARDS_CSV.exists():
             with open(config.BOARDS_CSV, newline="", encoding="utf-8") as f:
