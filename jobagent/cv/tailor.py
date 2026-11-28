@@ -184,7 +184,7 @@ def tailor(client, source: dict, posting: dict, log=print, force_letter: bool = 
 
         # 6. Render, fit, and check the PDFs.
         log("  rendering")
-        pdf, pdf_problems = build(source, cv, out)
+        pdf, pdf_problems = build(source, cv, out, market=posting.get("market", ""))
         problems += pdf_problems
         # Fitting may have dropped bullets; keep the JSON in step with the PDF.
         (out / "tailored.json").write_text(json.dumps(cv, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -268,6 +268,7 @@ def tailor_url(client, source: dict, url: str, *, posting_file: Path | None = No
                             "to a text file and pass --posting-file.")
     posting["company"] = company or posting.get("company", "")
     posting["role"] = role or posting.get("role", "")
+    posting["market"] = row.get("market", "")
     result = tailor(client, source, posting, log=log, force_letter=force_letter)
     if result.ok and result.pdf and row:
         store.update_job(url, cv=str(result.pdf.relative_to(config.DATA_DIR)),

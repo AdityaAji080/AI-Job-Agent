@@ -38,7 +38,7 @@ def _render(args, source) -> int:
     if any(p.level == "error" for p in problems):
         print("Content check failed; not rendering.")
     else:
-        pdf, more = build(source, cv, args.out, args.max_pages)
+        pdf, more = build(source, cv, args.out, args.max_pages, market=args.market)
         problems += more
         if pdf:
             print(f"Rendered {pdf}")
@@ -134,6 +134,8 @@ def main() -> int:
         p.add_argument("--out", required=True, type=Path)
         p.add_argument("--max-pages", type=int, default=None,
                        help="overrides layout.max_pages in the source")
+        p.add_argument("--market", default="",
+                       help="use this market's layout (page limit, paper size) from layout.markets")
 
     args = ap.parse_args()
     if args.cmd == "apply-updates":

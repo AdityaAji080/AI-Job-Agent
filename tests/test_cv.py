@@ -186,3 +186,87 @@ def test_rebuilding_replaces_an_old_cv_pdf(tmp_path):
     pdf, _ = build(SOURCE, tailored(), tmp_path)
     assert pdf.name == "Jane_Example_CV.pdf"
     assert sorted(p.name for p in tmp_path.glob("*.pdf")) == ["Jane_Example_CV.pdf"]
+
+
+def _with_research(source=SOURCE):
+    source = copy.deepcopy(source)
+    source["projects"].append({"id": "paper", "title": "A Paper Under Review", "venue": "Workshop 2026",
+                               "dates": "2026", "section": "research",
+                               "bullets": [{"id": "m", "text": "Proposed a method."}]})
+    return source
+
+
+def test_research_projects_get_their_own_block():
+    source = _with_research()
+    cv = baseline(source)
+    tex = render_tex(source, cv)
+    research = tex.index("\\section{Research}")
+    assert tex.index("\\section{Experience}") < tex.index("\\section{Projects}") < research
+    assert tex.index("A Paper Under Review") > research
+    assert tex.index("Uncertainty Estimates") < research          # an ordinary project stays put
+    cv["section_order"] = "research_first"
+    assert check_content(source, cv) == []
+    tex = render_tex(source, cv)
+    assert tex.index("\\section{Research}") < tex.index("\\section{Experience}") < tex.index("\\section{Projects}")
+
+
+def test_an_empty_block_leaves_no_heading():
+    source = _with_research()
+    cv = baseline(source)
+    cv["projects"] = [p for p in cv["projects"] if p["id"] == "paper"]
+    tex = render_tex(source, cv)
+    assert "\\section{Research}" in tex and "\\section{Projects}" not in tex
+
+
+def test_section_titles_and_unknown_sections():
+    source = _with_research()
+    source["layout"] = {"section_titles": {"projects": "Engineering Projects"}}
+    assert "\\section{Engineering Projects}" in render_tex(source, baseline(source))
+    bad = copy.deepcopy(source)
+    bad["projects"][-1]["section"] = "hobbies"
+    path = Path(__file__).parent / "_bad_source.yaml"
+    import yaml
+    path.write_text(yaml.safe_dump(bad), encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="section must be one of"):
+            load_source(path)
+    finally:
+        path.unlink()
+
+
+def test_layout_per_market():
+    from jobagent.cv.render import layout_for, page_budget_text
+    source = copy.deepcopy(SOURCE)
+    source["layout"] = {"max_pages": 2, "paper": "a4",
+                        "markets": {"United States": {"max_pages": 1, "paper": "letter"}}}
+    assert layout_for(source, "Singapore") == {"max_pages": 2, "paper": "a4"}
+    assert layout_for(source, "united states ") == {"max_pages": 1, "paper": "letter"}
+    assert layout_for(source) == {"max_pages": 2, "paper": "a4"}
+    assert page_budget_text(source) == "2 pages (1 page for United States)"
+    assert "a4paper" in render_tex(source, baseline(source), layout_for(source, "India"))
+    assert layout_for({"layout": {}}) == {"max_pages": 1, "paper": "letter"}   # old sources unchanged
+    with pytest.raises(ValueError):
+        layout_for({"layout": {"paper": "legal"}})
+
+
+def test_market_reaches_the_posting_block():
+    from jobagent.cv import llm
+    block = llm._posting_block({"company": "Acme", "role": "AI Engineer", "url": "u",
+                                "market": "Singapore", "text": "Build agents."})
+    assert "Market: Singapore" in block
+    assert "Market:" not in llm._posting_block({"company": "A", "role": "R", "url": "u", "text": "t"})
+
+
+@needs_latex
+def test_a_spill_over_is_pulled_back_onto_the_page_before(tmp_path):
+    from jobagent.cv.render import page_count
+    cv = tailored()
+    # Add bullets until the CV just runs onto a second page.
+    for i in range(60):
+        cv["experience"][0]["bullets"].append({"from": "pricing", "text": f"Built a pricing service ({i})."})
+        pdf, _ = build(SOURCE, copy.deepcopy(cv), tmp_path, max_pages=2, fit=False)
+        if page_count(pdf) == 2:
+            break
+    pdf, problems = build(SOURCE, cv, tmp_path, max_pages=2)
+    assert page_count(pdf) == 1
+    assert any(p.where == "fit" for p in problems)

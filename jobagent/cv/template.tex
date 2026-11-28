@@ -2,7 +2,7 @@
 %% and the tailored selection. Every interpolated value is LaTeX-escaped.
 %% Jinja delimiters are triple parentheses for values and paren-star for statements,
 %% so they never clash with LaTeX braces. See render.py.
-\documentclass[10pt,letterpaper]{article}
+\documentclass[10pt,((( paper )))]{article}
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.92]{helvet}
 \renewcommand{\familydefault}{\sfdefault}
@@ -48,10 +48,13 @@
 ((* endfor *))
 
 ((* for section in sections *))
-((* if section == "experience" *))
-\section{Experience}
-((* for e in experience *))
+\section{((( section.title )))}
+((* for e in section.entries *))
+((* if section.kind == "experience" *))
 \entry{((( e.title )))}{((( [e.org, e.location] | select | join(', ') )))}{((( e.dates )))}
+((* else *))
+\entry{((( e.title )))}{((( e.venue )))}{((( e.dates )))}
+((* endif *))
 \begin{itemize}
 ((* for b in e.bullets *))
   \item ((( b )))
@@ -59,18 +62,6 @@
 \end{itemize}
 ((* if not loop.last *))\vspace{2pt}((* endif *))
 ((* endfor *))
-((* elif projects *))
-\section{Projects}
-((* for p in projects *))
-\entry{((( p.title )))}{((( p.venue )))}{((( p.dates )))}
-\begin{itemize}
-((* for b in p.bullets *))
-  \item ((( b )))
-((* endfor *))
-\end{itemize}
-((* if not loop.last *))\vspace{2pt}((* endif *))
-((* endfor *))
-((* endif *))
 
 ((* endfor *))
 \section{Education}

@@ -12,6 +12,15 @@ headline_options: [Backend Engineer, Machine Learning Engineer]
 
 layout:
   max_pages: 1
+  paper: letter        # or a4
+  # Optional overrides per market (the tracker's market column), e.g. two A4 pages
+  # by default and one Letter page for the US:
+  #   max_pages: 2
+  #   paper: a4
+  #   markets:
+  #     United States: {max_pages: 1, paper: letter}
+  # Optional section headings:
+  #   section_titles: {projects: Engineering Projects}
 
 contact:
   email: jane@example.com
@@ -46,6 +55,8 @@ experience:
       - id: oncall
         text: Ran the team's on-call rotation and wrote the incident runbooks.
 
+# A project with `section: research` prints under its own Research heading; the model
+# chooses whether Experience, Projects or Research leads.
 projects:
   - id: thesis
     title: Uncertainty Estimates for Delivery-Time Prediction

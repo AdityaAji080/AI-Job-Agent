@@ -6,6 +6,7 @@ a near-empty last page, contact details that didn't survive, text that was clipp
 """
 from __future__ import annotations
 
+import copy
 import re
 import shutil
 import subprocess
@@ -20,8 +21,47 @@ from .content import Problem
 
 TEMPLATE_DIR = Path(__file__).parent
 MAX_PAGES = 2
-# A last page with less text than this share of the first page reads as a spill-over.
-MIN_LAST_PAGE_FILL = 0.25
+# A last page with less text than this share of the first page reads as a spill-over:
+# a few stray lines rather than a page the reader can use. A part-filled page above
+# this is fine.
+MIN_LAST_PAGE_FILL = 0.12
+# How many bullets build() may drop to pull a spill-over back onto the page before it.
+MAX_SPILL_TRIM = 2
+PAPERS = {"a4": "a4paper", "letter": "letterpaper"}
+SECTION_TITLES = {"experience": "Experience", "projects": "Projects", "research": "Research"}
+
+
+def layout_for(source: dict, market: str = "") -> dict:
+    """Page limit and paper size for one application.
+
+    The source's `layout` sets the defaults; `layout.markets` overrides them per market
+    (the tracker's market column), e.g. a one-page US Letter CV for the United States:
+
+        layout:
+          max_pages: 2
+          paper: a4
+          markets:
+            United States: {max_pages: 1, paper: letter}
+    """
+    layout = source.get("layout") or {}
+    markets = {k.strip().lower(): v or {} for k, v in (layout.get("markets") or {}).items()}
+    chosen = {**{k: v for k, v in layout.items() if k != "markets"},
+              **markets.get((market or "").strip().lower(), {})}
+    paper = str(chosen.get("paper") or "letter").lower()
+    if paper not in PAPERS:
+        raise ValueError(f"layout paper '{paper}' is not one of {', '.join(PAPERS)}")
+    return {"max_pages": int(chosen.get("max_pages") or 1), "paper": paper}
+
+
+def page_budget_text(source: dict) -> str:
+    """The page budget in words, for the tailoring prompt: "2 pages (1 page for United States)"."""
+    layout = source.get("layout") or {}
+    def pages(n):
+        return f"{n} page{'s' * (n != 1)}"
+    base = layout_for(source)["max_pages"]
+    exceptions = [f"{pages(layout_for(source, m)['max_pages'])} for {m}"
+                  for m in (layout.get("markets") or {}) if layout_for(source, m)["max_pages"] != base]
+    return pages(base) + (f" ({'; '.join(exceptions)})" if exceptions else "")
 
 _TEX_SPECIAL = {
     "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
@@ -49,7 +89,7 @@ def _env() -> jinja2.Environment:
     )
 
 
-def context(source: dict, cv: dict) -> dict:
+def context(source: dict, cv: dict, layout: dict | None = None) -> dict:
     """Merge: headers and facts from the source, chosen and reworded text from the CV."""
     c = source["contact"]
     contact = [c.get(k) for k in ("location", "phone", "email", "linkedin", "github") if c.get(k)]
@@ -66,18 +106,27 @@ def context(source: dict, cv: dict) -> dict:
     wanted = {c.lower() for c in cv.get("coursework") or []}
     education = [{**ed, "coursework": [c for c in ed.get("coursework") or [] if c.lower() in wanted]}
                  for ed in source.get("education") or []]
-    first = "projects" if cv.get("section_order") == "projects_first" else "experience"
+    projects = merged("projects", False)
+    blocks = {"experience": merged("experience", True),
+              "projects": [p for p in projects if p.get("section", "projects") == "projects"],
+              "research": [p for p in projects if p.get("section") == "research"]}
+    first = {"projects_first": "projects", "research_first": "research"}.get(
+        cv.get("section_order"), "experience")
+    order = [first] + [b for b in ("experience", "projects", "research") if b != first]
+    titles = {**SECTION_TITLES, **((source.get("layout") or {}).get("section_titles") or {})}
+    layout = layout or layout_for(source)
     return {"name": source["name"],
             "headline": (cv.get("headline") or "").strip() or source.get("headline", ""),
-            "sections": [first, "projects" if first == "experience" else "experience"],
+            "paper": PAPERS[layout["paper"]],
+            # Empty blocks (no research entries chosen, say) leave no heading behind.
+            "sections": [{"kind": b, "title": titles[b], "entries": blocks[b]} for b in order if blocks[b]],
             "contact_line": " | ".join(contact),
             "summary": cv["summary"], "skills": [g for g in cv["skills"] if g.get("items")],
-            "experience": merged("experience", True), "projects": merged("projects", False),
             "education": education}
 
 
-def render_tex(source: dict, cv: dict) -> str:
-    return _env().get_template("template.tex").render(**context(source, cv))
+def render_tex(source: dict, cv: dict, layout: dict | None = None) -> str:
+    return _env().get_template("template.tex").render(**context(source, cv, layout))
 
 
 def compile_pdf(tex: str, out_pdf: Path) -> tuple[bool, str]:
@@ -170,24 +219,32 @@ def pdf_filename(source: dict) -> str:
 
 
 def build(source: dict, cv: dict, out_dir: Path, max_pages: int | None = None,
-          fit: bool = True) -> tuple[Path | None, list[Problem]]:
+          fit: bool = True, market: str = "") -> tuple[Path | None, list[Problem]]:
     """Render, compile and check. Writes cv.tex always, and the PDF (named after the
     candidate, see pdf_filename) when it compiles.
 
-    With `fit`, a CV that runs past its page limit loses its least important bullets
-    one at a time until it fits; each removal is reported, never silent.
+    The page limit and paper size come from layout_for(source, market); `max_pages`
+    overrides the limit. With `fit`, a CV that runs past its page limit loses its least
+    important bullets one at a time until it fits, and a last page holding only a few
+    stray lines loses up to MAX_SPILL_TRIM bullets to pull them back. Each removal is
+    reported, never silent.
     """
-    max_pages = max_pages or (source.get("layout") or {}).get("max_pages") or MAX_PAGES
+    layout = layout_for(source, market)
+    max_pages = max_pages or layout["max_pages"]
     out_dir.mkdir(parents=True, exist_ok=True)
     pdf = out_dir / pdf_filename(source)
     legacy = out_dir / "cv.pdf"  # the name used before; never leave two CVs in one folder
     if legacy != pdf and legacy.exists():
         legacy.unlink()
     dropped: list[str] = []
-    while True:
-        tex = render_tex(source, cv)
+
+    def compile_once() -> tuple[bool, str]:
+        tex = render_tex(source, cv, layout)
         (out_dir / "cv.tex").write_text(tex, encoding="utf-8")
-        ok, note = compile_pdf(tex, pdf)
+        return compile_pdf(tex, pdf)
+
+    while True:
+        ok, note = compile_once()
         if not ok:
             return None, [Problem("error", "compile", note)]
         if not fit or page_count(pdf) <= max_pages:
@@ -196,9 +253,34 @@ def build(source: dict, cv: dict, out_dir: Path, max_pages: int | None = None,
         if gone is None:
             break
         dropped.append(gone)
+
+    if fit and 1 < page_count(pdf) <= max_pages and _last_page_fill(pdf) < MIN_LAST_PAGE_FILL:
+        pages, saved, trimmed = page_count(pdf), copy.deepcopy(cv), []
+        while len(trimmed) < MAX_SPILL_TRIM and page_count(pdf) == pages:
+            gone = drop_one_bullet(cv)
+            if gone is None:
+                break
+            trimmed.append(gone)
+            ok, note = compile_once()
+            if not ok:
+                return None, [Problem("error", "compile", note)]
+        if page_count(pdf) < pages:
+            dropped += trimmed
+        else:  # trimming didn't pull it back: keep every bullet and warn instead
+            cv.clear()
+            cv.update(saved)
+            ok, note = compile_once()
+            if not ok:
+                return None, [Problem("error", "compile", note)]
+
     problems = check_pdf(pdf, source, cv, max_pages)
     if dropped:
         problems.append(Problem("warn", "fit", f"dropped to fit {max_pages} page(s): {', '.join(dropped)}"))
     if note:
         problems.append(Problem("warn", "layout", note))
     return pdf, problems
+
+
+def _last_page_fill(pdf: Path) -> float:
+    pages = [p.extract_text() or "" for p in PdfReader(str(pdf)).pages]
+    return len(pages[-1]) / max(1, len(pages[0]))
